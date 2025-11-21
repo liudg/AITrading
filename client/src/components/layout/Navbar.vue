@@ -83,108 +83,103 @@ let statusInterval: number | null = null;
 
 // 计算美股市场状态（使用北京时间显示）
 function calculateMarketStatus(): MarketStatus {
+  // 1. 获取当前时间 (服务器已经是北京时间，直接用)
   const now = new Date();
+
+  // 2. 判断是否夏令时 (美股规则：3月第2个周日 到 11月第1个周日)
+  const isDst = checkIsDst(now);
+
+  // 3. 根据夏令时设定北京时间的阈值
+  // 夏令时: 21:30 开盘, 次日 04:00 收盘
+  // 冬令时: 22:30 开盘, 次日 05:00 收盘
+  const openHour = isDst ? 21 : 22;
+  const openMinute = 30;
+  const closeHour = isDst ? 4 : 5;
   
-  // 判断是否夏令时
-  const isDST = isDaylightSavingTime(now);
-  
-  // 美股交易时间（美东时间）：09:30 - 16:00
-  // 转换为北京时间：
-  // 冬令时（EST, UTC-5）：22:30 - 次日05:00
-  // 夏令时（EDT, UTC-4）：21:30 - 次日04:00
-  const marketOpenHour = isDST ? 21 : 22;
-  const marketOpenMinute = 30;
-  const marketCloseHour = isDST ? 4 : 5;
-  const marketCloseMinute = 0;
-  
-  // 获取北京时间
-  const utcHours = now.getUTCHours();
-  const utcMinutes = now.getUTCMinutes();
-  const utcDay = now.getUTCDay();
-  const utcDate = now.getUTCDate();
-  const utcMonth = now.getUTCMonth();
-  
-  // 转换为北京时间 (UTC+8)
-  let bjHours = utcHours + 8;
-  let bjDay = utcDay;
-  let bjDate = utcDate;
-  let bjMonth = utcMonth;
-  
-  // 处理跨天
-  if (bjHours >= 24) {
-    bjHours -= 24;
-    bjDate += 1;
-    bjDay = (bjDay + 1) % 7;
+  const openThreshold = openHour * 60 + openMinute; // 晚间开盘分钟数
+  const closeThreshold = closeHour * 60;            // 凌晨收盘分钟数
+
+  // 4. 核心逻辑：判断当前是否在交易时段
+  // 美股时段拆解为北京时间：
+  // A段 (凌晨): 周二至周六的 00:00 ~ 04:00/05:00
+  // B段 (晚间): 周一至周五的 21:30/22:30 ~ 23:59
+
+  const dayOfWeek = now.getDay(); // 0(Sun) - 6(Sat)
+  // 转换为“当天的分钟数”用于比较 (例如 10:30 = 630)
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const isMorningSession = (dayOfWeek >= 2 && dayOfWeek <= 6) && (currentMinutes < closeThreshold);
+  const isEveningSession = (dayOfWeek >= 1 && dayOfWeek <= 5) && (currentMinutes >= openThreshold);
+
+  // --- 场景 1: 正在交易中 ---
+  if (isMorningSession) {
+    // 凌晨时段：收盘时间是今天 (例如今天凌晨 04:00)
+    const closeTime = new Date(now);
+    closeTime.setHours(closeHour, 0, 0, 0);
+    return { isOpen: true, message: `收盘时间：${formatDate(closeTime)}` };
   }
-  
-  const currentMinutes = bjHours * 60 + utcMinutes;
-  
-  // 周末判断（周六、周日休市）
-  if (bjDay === 0 || bjDay === 6) {
-    // 计算下周一开盘时间
-    const daysUntilMonday = bjDay === 0 ? 1 : 2;
-    const nextOpenDate = bjDate + daysUntilMonday;
-    const nextOpenMonth = bjMonth + 1;
-    
-    return {
-      isOpen: false,
-      message: `开盘时间：${nextOpenMonth.toString().padStart(2, '0')}/${nextOpenDate.toString().padStart(2, '0')} ${marketOpenHour.toString().padStart(2, '0')}:${marketOpenMinute.toString().padStart(2, '0')}`,
-    };
+
+  if (isEveningSession) {
+    // 晚间时段：收盘时间是明天凌晨
+    const closeTime = new Date(now);
+    closeTime.setDate(closeTime.getDate() + 1); // +1天
+    closeTime.setHours(closeHour, 0, 0, 0);
+    return { isOpen: true, message: `收盘时间：${formatDate(closeTime)}` };
   }
-  
-  // 判断是否在交易时间内
-  // 注意：收盘时间是次日凌晨，需要特殊处理
-  const marketOpenMinutes = marketOpenHour * 60 + marketOpenMinute;
-  const marketCloseMinutes = marketCloseHour * 60 + marketCloseMinute;
-  
-  // 开市时间段：22:30-23:59（当天晚上）或 00:00-05:00（次日凌晨）
-  const isInTradingHours = 
-    (currentMinutes >= marketOpenMinutes) || // 晚上22:30之后
-    (currentMinutes < marketCloseMinutes);   // 凌晨05:00之前
-  
-  if (isInTradingHours) {
-    // 开市中，显示收盘时间
-    let closeDate = bjDate;
-    let closeMonth = bjMonth;
-    
-    // 如果当前时间>=22:30，收盘时间是明天
-    if (bjHours >= marketOpenHour) {
-      closeDate += 1;
+
+  // --- 场景 2: 休市中 (计算下次开盘) ---
+  let targetDate = new Date(now);
+  targetDate.setHours(openHour, openMinute, 0, 0);
+
+  if (dayOfWeek === 6) {
+    // 周六：下次开盘是下周一 (今天+2天)
+    targetDate.setDate(targetDate.getDate() + 2);
+  } 
+  else if (dayOfWeek === 0) {
+    // 周日：下次开盘是下周一 (今天+1天)
+    targetDate.setDate(targetDate.getDate() + 1);
+  } 
+  else {
+    // 周一到周五
+    if (currentMinutes >= openThreshold) {
+      // 理论上不会进这里，因为上面 isEveningSession 已经拦截了
+      // 这里作为兜底，如果万一过了时间点算作明天
+      targetDate.setDate(targetDate.getDate() + 1);
+    } else {
+      // 如果还没到今天的开盘时间 (例如周一中午 12:00)
+      // 目标就是今天的 21:30，不做日期变更
+      // 注意：如果是周二到周五的凌晨收盘后(比如 06:00)，也属于“还没到今晚开盘”，逻辑一致
     }
-    
-    return {
-      isOpen: true,
-      message: `收盘时间：${(closeMonth + 1).toString().padStart(2, '0')}/${closeDate.toString().padStart(2, '0')} ${marketCloseHour.toString().padStart(2, '0')}:${marketCloseMinute.toString().padStart(2, '0')}`,
-    };
-  } else {
-    // 休市中，显示开盘时间（今天晚上22:30）
-    return {
-      isOpen: false,
-      message: `开盘时间：${(bjMonth + 1).toString().padStart(2, '0')}/${bjDate.toString().padStart(2, '0')} ${marketOpenHour.toString().padStart(2, '0')}:${marketOpenMinute.toString().padStart(2, '0')}`,
-    };
   }
+
+  return { isOpen: false, message: `开盘时间：${formatDate(targetDate)}` };
 }
 
-// 判断是否夏令时（Daylight Saving Time）
-function isDaylightSavingTime(date: Date): boolean {
-  // 夏令时：3月第二个周日凌晨2点 到 11月第一个周日凌晨2点
-  const year = date.getUTCFullYear();
+/**
+ * 使用 Intl 判断美东时间是否为夏令时
+ * 返回 true (EDT/夏令时) 或 false (EST/冬令时)
+ */
+ function checkIsDst(date: Date): boolean {
+  // 使用 en-US locale 和 America/New_York 时区
+  // timeZoneName: 'short' 会返回 "EST" 或 "EDT"
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    timeZoneName: 'short'
+  });
   
-  // 计算3月第二个周日
-  const marchFirst = new Date(Date.UTC(year, 2, 1));
-  const marchFirstDay = marchFirst.getUTCDay();
-  const daysToFirstSunday = marchFirstDay === 0 ? 0 : 7 - marchFirstDay;
-  const marchSecondSundayDate = 1 + daysToFirstSunday + 7;
-  const marchSecondSunday = new Date(Date.UTC(year, 2, marchSecondSundayDate, 2, 0, 0));
+  const parts = formatter.formatToParts(date);
+  const tzPart = parts.find(p => p.type === 'timeZoneName');
   
-  // 计算11月第一个周日
-  const novemberFirst = new Date(Date.UTC(year, 10, 1));
-  const novemberFirstDay = novemberFirst.getUTCDay();
-  const daysToNovemberSunday = novemberFirstDay === 0 ? 0 : 7 - novemberFirstDay;
-  const novemberFirstSundayDate = 1 + daysToNovemberSunday;
-  const novemberFirstSunday = new Date(Date.UTC(year, 10, novemberFirstSundayDate, 2, 0, 0));
-  
-  return date >= marchSecondSunday && date < novemberFirstSunday;
+  // EDT = Eastern Daylight Time (夏令时)
+  return tzPart?.value === 'EDT';
+}
+
+// 简单格式化 (服务器已是北京时间，直接输出)
+function formatDate(date: Date): string {
+  const m = (date.getMonth() + 1).toString().padStart(2, '0');
+  const d = date.getDate().toString().padStart(2, '0');
+  const h = date.getHours().toString().padStart(2, '0');
+  const min = date.getMinutes().toString().padStart(2, '0');
+  return `${m}/${d} ${h}:${min}`;
 }
 
 // 更新市场状态
