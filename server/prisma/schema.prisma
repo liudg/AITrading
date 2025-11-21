@@ -1,0 +1,285 @@
+// Prisma Schema for AI Trading System
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// AI 模型配置
+model Model {
+  id          String   @id @default(uuid())
+  name        String   @unique // "DeepSeek-V3", "Qwen-Max"
+  displayName String   // 显示名称
+  apiConfig   String   // JSON string: { apiKey, apiUrl, modelId }
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  portfolio   Portfolio?
+  trades      Trade[]
+  reflections Reflection[]
+  reportPerformances ReportModelPerformance[]
+
+  @@map("models")
+}
+
+// 投资组合 (每个模型一个独立账户)
+model Portfolio {
+  id           String   @id @default(uuid())
+  modelId      String   @unique
+  model        Model    @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  
+  cash         Float    @default(100000) // 当前现金
+  totalValue   Float    @default(100000) // 总资产 (现金 + 持仓市值)
+  initialValue Float    @default(100000) // 初始资金
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  positions    Position[]
+  snapshots    PortfolioSnapshot[]
+
+  @@map("portfolios")
+}
+
+// 投资组合历史快照 (用于绘制资产曲线)
+model PortfolioSnapshot {
+  id          String    @id @default(uuid())
+  portfolioId String
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  
+  totalValue  Float     // 总资产
+  cash        Float     // 现金
+  positionValue Float   // 持仓市值
+  returnPct   Float     // 收益率 (%)
+  
+  timestamp   DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+
+  @@index([portfolioId, timestamp])
+  @@map("portfolio_snapshots")
+}
+
+// 持仓
+model Position {
+  id          String    @id @default(uuid())
+  portfolioId String
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  
+  symbol      String    // 股票代码 "NVDA"
+  quantity    Int       // 持仓数量
+  avgPrice    Float     // 平均成本
+  currentPrice Float    // 当前价格
+  marketValue Float     // 市值
+  unrealizedPnL Float   // 未实现盈亏
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([portfolioId, symbol])
+  @@map("positions")
+}
+
+// 交易记录
+model Trade {
+  id         String   @id @default(uuid())
+  modelId    String
+  model      Model    @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  
+  symbol     String   // 股票代码
+  side       String   // "BUY" | "SELL"
+  quantity   Int      // 交易数量
+  price      Float    // 成交价格
+  amount     Float    // 交易金额
+  
+  rationale  String   // AI 的决策理由 (核心字段!)
+  status     String   @default("PENDING") // "PENDING" | "EXECUTED" | "CLOSED"
+  
+  executedAt DateTime? // 执行时间
+  closedAt   DateTime? // 平仓时间
+  pnl        Float?    // 已实现盈亏 (仅在 CLOSED 时有值)
+  
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  reflection Reflection?
+
+  @@index([modelId, status])
+  @@index([symbol])
+  @@map("trades")
+}
+
+// 反思记录 (AI 的经验教训)
+model Reflection {
+  id        String   @id @default(uuid())
+  tradeId   String   @unique
+  trade     Trade    @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  modelId   String
+  model     Model    @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  
+  content   String   // AI 生成的反思内容
+  pnl       Float    // 该笔交易的盈亏
+  score     Int      @default(5) // 经验重要性评分 (1-10)
+  
+  createdAt DateTime @default(now())
+
+  @@index([modelId, score])
+  @@map("reflections")
+}
+
+// 股票池
+model StockPool {
+  id        String   @id @default(uuid())
+  name      String   // 股票池名称 "AI Selected Tech Stocks"
+  symbols   String   // JSON array: ["NVDA", "TSLA", "AAPL"]
+  createdBy String   @default("USER") // "USER" | "AI"
+  reason    String?  // AI 选股时的整体推荐理由
+  active    Boolean  @default(true)
+  
+  createdAt DateTime @default(now())
+
+  @@map("stock_pools")
+}
+
+// 市场数据缓存 (用于回测和减少 API 调用)
+model MarketData {
+  id        String   @id @default(uuid())
+  symbol    String
+  date      DateTime
+  
+  open      Float
+  high      Float
+  low       Float
+  close     Float
+  volume    Int
+  
+  createdAt DateTime @default(now())
+
+  @@unique([symbol, date])
+  @@index([symbol])
+  @@map("market_data")
+}
+
+// 新闻数据缓存
+model NewsData {
+  id        String   @id @default(uuid())
+  symbol    String?  // 关联的股票代码 (可为空，表示大盘新闻)
+  title     String
+  summary   String
+  sentiment String   // "POSITIVE" | "NEGATIVE" | "NEUTRAL"
+  source    String
+  url       String?
+  
+  publishedAt DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([symbol, publishedAt])
+  @@map("news_data")
+}
+
+// 系统配置
+model SystemConfig {
+  id    String @id @default(uuid())
+  key   String @unique
+  value String // JSON string
+  
+  updatedAt DateTime @updatedAt
+
+  @@map("system_config")
+}
+
+// 每日战报
+model DailyReport {
+  id              String   @id @default(uuid())
+  day             Int      @unique // Day 1, Day 2...
+  date            DateTime // 战报日期
+  title           String   // 标题
+  summary         String?  // 总结
+  overallInsight  String?  // 整体洞察
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  modelPerformances ReportModelPerformance[]
+  stockDistributions ReportStockDistribution[]
+
+  @@index([date])
+  @@map("daily_reports")
+}
+
+// 战报中每个模型的表现详情
+model ReportModelPerformance {
+  id              String   @id @default(uuid())
+  reportId        String
+  report          DailyReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  modelId         String
+  model           Model @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  
+  // 绩效指标
+  totalValue      Float    // 总资产
+  returnAmount    Float    // 收益金额
+  returnPct       Float    // 收益率 (%)
+  dailyReturn     Float?   // 当日收益
+  dailyReturnPct  Float?   // 当日收益率 (%)
+  
+  // 仓位信息
+  cashRatio       Float    @default(0) // 现金比例 (%)
+  positionRatio   Float    @default(0) // 仓位比例 (%)
+  
+  // 排名变化
+  rankChange      Int?     // 排名变化 (+1/-1/0)，第一天为null
+  
+  // 持仓统计
+  positionsCount  Int      // 持仓数量
+  positionsDetail String?  // JSON: 持仓详情
+  
+  // 交易统计
+  tradesCount     Int      // 交易次数
+  buyCount        Int      @default(0)
+  sellCount       Int      @default(0)
+  winRate         Float?   // 胜率 (%)
+  
+  // 最佳/最差交易（全局历史）
+  bestTrade       String?  // JSON: 最佳交易详情
+  worstTrade      String?  // JSON: 最差交易详情
+  
+  // 当日所有交易
+  todayTrades     String?  // JSON: 当日所有交易列表（包括未平仓）
+  
+  // AI 分析
+  strategyAnalysis String? // 策略分析
+  keyInsights     String?  // 关键洞察 (JSON 数组)
+  
+  createdAt       DateTime @default(now())
+
+  @@unique([reportId, modelId])
+  @@index([modelId])
+  @@map("report_model_performances")
+}
+
+// 战报中的持仓分布统计
+model ReportStockDistribution {
+  id              String   @id @default(uuid())
+  reportId        String
+  report          DailyReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  
+  symbol          String   // 股票代码
+  holdingAICount  Int      // 持有AI数量
+  totalShares     Int      // 总持股数
+  totalValue      Float    // 总市值
+  totalPnL        Float    // 总浮盈浮亏
+  
+  holders         String   // JSON: 持有者列表 [{modelName, shares, avgPrice, currentPrice, pnl}]
+  changes         String?  // JSON: 变化列表 [{modelName, action: 'NEW'|'CLOSED'}]
+  
+  createdAt       DateTime @default(now())
+
+  @@unique([reportId, symbol])
+  @@index([symbol])
+  @@map("report_stock_distributions")
+}
+

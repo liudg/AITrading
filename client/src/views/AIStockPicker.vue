@@ -1,0 +1,439 @@
+<template>
+  <div class="min-h-screen bg-cyber-black">
+    <Navbar />
+
+    <div class="max-w-7xl mx-auto px-6 py-12">
+      <h1 class="text-4xl font-bold text-cyber-green mb-8">AI 智能选股</h1>
+
+      <!-- Tab Navigation -->
+      <div class="flex space-x-4 mb-8 border-b border-cyber-gray">
+        <button
+          @click="activeTab = 'batch'"
+          :class="[
+            'px-6 py-3 text-sm font-medium transition-all',
+            activeTab === 'batch'
+              ? 'text-cyber-green border-b-2 border-cyber-green'
+              : 'text-gray-400 hover:text-gray-200',
+          ]"
+        >
+          批量选股
+        </button>
+        <button
+          @click="activeTab = 'single'"
+          :class="[
+            'px-6 py-3 text-sm font-medium transition-all',
+            activeTab === 'single'
+              ? 'text-cyber-green border-b-2 border-cyber-green'
+              : 'text-gray-400 hover:text-gray-200',
+          ]"
+        >
+          单一股票分析
+        </button>
+      </div>
+
+      <!-- Batch Stock Picker Tab -->
+      <div v-show="activeTab === 'batch'" class="space-y-6">
+        <!-- Input Form -->
+        <div v-if="!batchRecommendations.length" class="cyber-card">
+          <h3 class="text-xl font-bold text-cyber-green mb-4">设置筛选条件</h3>
+          <div class="space-y-4">
+            <div>
+              <label class="block text-sm text-gray-400 mb-2">筛选条件</label>
+              <textarea
+                v-model="batchCriteria"
+                rows="4"
+                class="cyber-input w-full resize-none"
+                placeholder="例如: 寻找最近一周新闻热度高的科技股，市值在100亿美元以上"
+              />
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm text-gray-400 mb-2">最大结果数</label>
+                <input v-model.number="batchMaxResults" type="number" min="5" max="20" class="cyber-input w-full" />
+              </div>
+              <div>
+                <label class="block text-sm text-gray-400 mb-2">目标收益率</label>
+                <input
+                  v-model="targetReturn"
+                  type="text"
+                  class="cyber-input w-full"
+                  placeholder="例如: 20%"
+                />
+              </div>
+            </div>
+
+            <button
+              @click="performBatchPicking"
+              :disabled="batchLoading || !batchCriteria.trim()"
+              class="cyber-button w-full disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span class="flex items-center justify-center space-x-2">
+                <svg v-if="batchLoading" class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path
+                    class="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  ></path>
+                </svg>
+                <span>{{ batchLoading ? 'AI 分析中...' : '开始批量选股' }}</span>
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Recommendations -->
+        <div v-else class="space-y-4">
+          <div class="flex items-center justify-between mb-4">
+            <div class="text-lg text-gray-300">
+              找到 <span class="text-cyber-green font-bold">{{ batchRecommendations.length }}</span> 只股票
+            </div>
+            <button @click="resetBatchForm" class="text-sm text-cyber-blue hover:underline">
+              重新搜索
+            </button>
+          </div>
+
+          <div class="space-y-3">
+            <div
+              v-for="rec in batchRecommendations"
+              :key="rec.symbol"
+              class="cyber-card hover:border-cyber-green transition-all cursor-pointer"
+              :class="{ 'border-cyber-green bg-cyber-green/5': batchSelectedSymbols.includes(rec.symbol) }"
+              @click="toggleBatchSelection(rec.symbol)"
+            >
+              <div class="flex items-start justify-between">
+                <div class="flex-1">
+                  <div class="flex items-center space-x-3 mb-2">
+                    <span class="text-lg font-bold text-cyber-green">{{ rec.symbol }}</span>
+                    <span class="text-sm text-gray-400">{{ rec.name }}</span>
+                    <span class="px-2 py-1 text-xs bg-cyber-yellow/20 text-cyber-yellow rounded">
+                      评分: {{ rec.score }}/10
+                    </span>
+                  </div>
+                  <p class="text-sm text-gray-300 leading-relaxed">{{ rec.reason }}</p>
+                </div>
+
+                <div class="ml-4">
+                  <div
+                    class="w-6 h-6 rounded border-2 flex items-center justify-center transition-all"
+                    :class="
+                      batchSelectedSymbols.includes(rec.symbol)
+                        ? 'border-cyber-green bg-cyber-green/20'
+                        : 'border-gray-500'
+                    "
+                  >
+                    <svg
+                      v-if="batchSelectedSymbols.includes(rec.symbol)"
+                      class="w-4 h-4 text-cyber-green"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="cyber-card bg-cyber-light">
+            <div class="flex space-x-4">
+              <button @click="batchSelectAll" class="cyber-button flex-1">全选</button>
+              <button @click="batchDeselectAll" class="cyber-button flex-1">取消全选</button>
+              <button
+                @click="saveBatchSelection"
+                :disabled="batchSelectedSymbols.length === 0"
+                class="cyber-button flex-1 bg-cyber-green/20 hover:bg-cyber-green/30 disabled:opacity-50"
+              >
+                保存股票池 ({{ batchSelectedSymbols.length }})
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Single Stock Analysis Tab -->
+      <div v-show="activeTab === 'single'" class="space-y-6">
+        <!-- Input Form -->
+        <div class="cyber-card">
+          <h3 class="text-xl font-bold text-cyber-green mb-4">输入股票代码</h3>
+          <div class="space-y-4">
+            <div>
+              <label class="block text-sm text-gray-400 mb-2">股票代码</label>
+              <input
+                v-model="singleSymbol"
+                type="text"
+                class="cyber-input w-full uppercase"
+                placeholder="例如: NVDA, TSLA, AAPL"
+                @input="singleSymbol = singleSymbol.toUpperCase()"
+              />
+            </div>
+
+            <div>
+              <label class="block text-sm text-gray-400 mb-2">分析维度（可选）</label>
+              <textarea
+                v-model="singleCriteria"
+                rows="3"
+                class="cyber-input w-full resize-none"
+                placeholder="例如: 从技术面、基本面、市场情绪等角度分析该股票的投资价值"
+              />
+            </div>
+
+            <button
+              @click="performSingleAnalysis"
+              :disabled="singleLoading || !singleSymbol.trim()"
+              class="cyber-button w-full disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span class="flex items-center justify-center space-x-2">
+                <svg v-if="singleLoading" class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path
+                    class="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  ></path>
+                </svg>
+                <span>{{ singleLoading ? 'AI 分析中...' : '开始分析' }}</span>
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Analysis Result -->
+        <div v-if="singleAnalysis" class="cyber-card">
+          <div class="flex items-center justify-between mb-6">
+            <h3 class="text-2xl font-bold text-cyber-green">{{ singleAnalysis.symbol }}</h3>
+            <button @click="resetSingleForm" class="text-sm text-cyber-blue hover:underline">
+              分析其他股票
+            </button>
+          </div>
+
+          <div class="space-y-6">
+            <!-- Basic Info -->
+            <div class="grid grid-cols-2 gap-4 pb-6 border-b border-cyber-gray">
+              <div>
+                <div class="text-sm text-gray-400 mb-1">公司名称</div>
+                <div class="text-lg font-medium">{{ singleAnalysis.name }}</div>
+              </div>
+              <div>
+                <div class="text-sm text-gray-400 mb-1">综合评分</div>
+                <div class="text-lg font-bold text-cyber-green">{{ singleAnalysis.score }}/10</div>
+              </div>
+            </div>
+
+            <!-- Analysis Content -->
+            <div>
+              <h4 class="text-lg font-bold text-cyber-blue mb-3">AI 分析报告</h4>
+              <div class="text-gray-300 leading-relaxed whitespace-pre-wrap">{{ singleAnalysis.analysis }}</div>
+            </div>
+
+            <!-- Investment Recommendation -->
+            <div
+              class="p-4 rounded-lg"
+              :class="
+                singleAnalysis.recommendation === '买入'
+                  ? 'bg-cyber-green/10 border border-cyber-green/30'
+                  : singleAnalysis.recommendation === '观望'
+                  ? 'bg-cyber-yellow/10 border border-cyber-yellow/30'
+                  : 'bg-cyber-red/10 border border-cyber-red/30'
+              "
+            >
+              <div class="flex items-center space-x-2 mb-2">
+                <span class="text-sm text-gray-400">投资建议:</span>
+                <span
+                  class="text-lg font-bold"
+                  :class="
+                    singleAnalysis.recommendation === '买入'
+                      ? 'text-cyber-green'
+                      : singleAnalysis.recommendation === '观望'
+                      ? 'text-cyber-yellow'
+                      : 'text-cyber-red'
+                  "
+                >
+                  {{ singleAnalysis.recommendation }}
+                </span>
+              </div>
+              <div class="text-sm text-gray-300">{{ singleAnalysis.reason }}</div>
+            </div>
+
+            <!-- Add to Stock Pool -->
+            <div class="flex space-x-4 pt-4 border-t border-cyber-gray">
+              <button
+                @click="addSingleToPool"
+                class="cyber-button flex-1 bg-cyber-green/20 hover:bg-cyber-green/30"
+              >
+                添加到股票池
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue';
+import Navbar from '@/components/layout/Navbar.vue';
+import { useTradingStore } from '@/stores/trading.store';
+import type { StockRecommendation } from '@/types';
+
+const tradingStore = useTradingStore();
+
+// Tab control
+const activeTab = ref<'batch' | 'single'>('batch');
+
+// Batch picking state
+const batchCriteria = ref('');
+const batchMaxResults = ref(10);
+const targetReturn = ref('');
+const batchLoading = ref(false);
+const batchRecommendations = ref<StockRecommendation[]>([]);
+const batchSelectedSymbols = ref<string[]>([]);
+
+// Single stock analysis state
+const singleSymbol = ref('');
+const singleCriteria = ref('');
+const singleLoading = ref(false);
+const singleAnalysis = ref<{
+  symbol: string;
+  name: string;
+  score: number;
+  analysis: string;
+  recommendation: string;
+  reason: string;
+} | null>(null);
+
+// Batch picking functions
+async function performBatchPicking() {
+  try {
+    batchLoading.value = true;
+    batchRecommendations.value = await tradingStore.pickStocks(batchCriteria.value, batchMaxResults.value);
+    // 默认选中所有推荐的股票
+    batchSelectedSymbols.value = batchRecommendations.value.map((r) => r.symbol);
+  } catch (error) {
+    alert('AI 分析失败，请重试');
+    console.error(error);
+  } finally {
+    batchLoading.value = false;
+  }
+}
+
+function toggleBatchSelection(symbol: string) {
+  const index = batchSelectedSymbols.value.indexOf(symbol);
+  if (index > -1) {
+    batchSelectedSymbols.value.splice(index, 1);
+  } else {
+    batchSelectedSymbols.value.push(symbol);
+  }
+}
+
+function batchSelectAll() {
+  batchSelectedSymbols.value = batchRecommendations.value.map((r) => r.symbol);
+}
+
+function batchDeselectAll() {
+  batchSelectedSymbols.value = [];
+}
+
+async function saveBatchSelection() {
+  try {
+    batchLoading.value = true;
+    await tradingStore.saveStockPool(batchSelectedSymbols.value, 'AI Selected Stocks', batchCriteria.value);
+    alert(`成功保存 ${batchSelectedSymbols.value.length} 只股票到股票池！`);
+    resetBatchForm();
+  } catch (error) {
+    alert('保存失败，请重试');
+    console.error(error);
+  } finally {
+    batchLoading.value = false;
+  }
+}
+
+function resetBatchForm() {
+  batchCriteria.value = '';
+  batchMaxResults.value = 10;
+  targetReturn.value = '';
+  batchRecommendations.value = [];
+  batchSelectedSymbols.value = [];
+}
+
+// Single stock analysis functions
+async function performSingleAnalysis() {
+  try {
+    singleLoading.value = true;
+    
+    // 调用后端API进行单一股票分析
+    // 这里暂时使用模拟数据，实际应该调用真实API
+    await new Promise(resolve => setTimeout(resolve, 2000)); // 模拟API延迟
+    
+    singleAnalysis.value = {
+      symbol: singleSymbol.value,
+      name: getStockName(singleSymbol.value),
+      score: Math.floor(Math.random() * 3) + 7, // 7-10分
+      analysis: generateMockAnalysis(singleSymbol.value),
+      recommendation: ['买入', '观望', '买入'][Math.floor(Math.random() * 3)],
+      reason: '综合考虑技术面、基本面和市场情绪，该股票当前具有较好的投资价值。',
+    };
+  } catch (error) {
+    alert('AI 分析失败，请重试');
+    console.error(error);
+  } finally {
+    singleLoading.value = false;
+  }
+}
+
+async function addSingleToPool() {
+  if (!singleAnalysis.value) return;
+  
+  try {
+    await tradingStore.saveStockPool(
+      [singleAnalysis.value.symbol],
+      `单一分析: ${singleAnalysis.value.symbol}`,
+      `评分: ${singleAnalysis.value.score}/10 - ${singleAnalysis.value.recommendation}`
+    );
+    alert(`成功添加 ${singleAnalysis.value.symbol} 到股票池！`);
+  } catch (error) {
+    alert('添加失败，请重试');
+    console.error(error);
+  }
+}
+
+function resetSingleForm() {
+  singleSymbol.value = '';
+  singleCriteria.value = '';
+  singleAnalysis.value = null;
+}
+
+// Helper functions
+function getStockName(symbol: string): string {
+  const names: Record<string, string> = {
+    NVDA: 'NVIDIA Corporation',
+    TSLA: 'Tesla, Inc.',
+    AAPL: 'Apple Inc.',
+    MSFT: 'Microsoft Corporation',
+    GOOGL: 'Alphabet Inc.',
+    META: 'Meta Platforms, Inc.',
+    AMZN: 'Amazon.com, Inc.',
+    AMD: 'Advanced Micro Devices, Inc.',
+  };
+  return names[symbol] || `${symbol} Inc.`;
+}
+
+function generateMockAnalysis(symbol: string): string {
+  return `【技术面分析】
+${symbol} 当前处于上升通道中，均线系统呈现多头排列。MACD指标金叉，RSI指标处于50-70区间，显示出较强的上涨动能。成交量持续放大，市场参与度较高。
+
+【基本面分析】
+公司业绩表现稳健，最近一季度营收同比增长15%，净利润增长20%。市盈率PE为28倍，低于行业平均水平，估值合理。公司在其细分领域具有领先地位，市场份额稳定增长。
+
+【市场情绪分析】
+近期新闻面偏正面，机构投资者持续增持。社交媒体讨论热度较高，市场情绪乐观。行业整体处于景气周期，政策环境有利。
+
+【风险提示】
+需关注宏观经济波动、行业竞争加剧、技术创新风险等因素。建议设置止损位，控制仓位在合理范围内。`;
+}
+</script>
+
