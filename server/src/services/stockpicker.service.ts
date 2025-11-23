@@ -1,10 +1,11 @@
 // AI 选股服务
 
-import { PrismaClient } from '@prisma/client';
-import { ILLMProvider } from '../adapters/llm/interface';
-import { StockPickerInput, StockRecommendation } from '../types';
+import { prisma } from "../lib/prisma";
+import { Logger } from "../lib/logger";
+import { ILLMProvider } from "../adapters/llm/interface";
+import { StockPickerInput, StockRecommendation } from "../types";
 
-const prisma = new PrismaClient();
+const logger = Logger.create("StockPickerService");
 
 export class StockPickerService {
   constructor(private llmProvider: ILLMProvider) {}
@@ -12,7 +13,10 @@ export class StockPickerService {
   /**
    * AI 选股
    */
-  async pickStocks(criteria: string, maxResults: number = 10): Promise<StockRecommendation[]> {
+  async pickStocks(
+    criteria: string,
+    maxResults: number = 10
+  ): Promise<StockRecommendation[]> {
     const input: StockPickerInput = {
       criteria,
       maxResults,
@@ -20,15 +24,22 @@ export class StockPickerService {
 
     const recommendations = await this.llmProvider.pickStocks(input);
 
-    console.log(`[StockPickerService] AI recommended ${recommendations.length} stocks`);
+    logger.info(`AI recommended ${recommendations.length} stocks`);
 
-    return recommendations.sort((a, b) => b.score - a.score).slice(0, maxResults);
+    return recommendations
+      .sort((a, b) => b.score - a.score)
+      .slice(0, maxResults);
   }
 
   /**
    * 保存股票池
    */
-  async saveStockPool(symbols: string[], name: string, createdBy: 'AI' | 'USER', reason?: string): Promise<string> {
+  async saveStockPool(
+    symbols: string[],
+    name: string,
+    createdBy: "AI" | "USER",
+    reason?: string
+  ): Promise<string> {
     // 将旧的股票池标记为 inactive
     await prisma.stockPool.updateMany({
       where: { active: true },
@@ -46,7 +57,9 @@ export class StockPickerService {
       },
     });
 
-    console.log(`[StockPickerService] Created new stock pool: ${name} with ${symbols.length} symbols`);
+    logger.info(
+      `Created new stock pool: ${name} with ${symbols.length} symbols`
+    );
 
     return stockPool.id;
   }
@@ -57,15 +70,23 @@ export class StockPickerService {
   async getActiveStockPool(): Promise<string[]> {
     const stockPool = await prisma.stockPool.findFirst({
       where: { active: true },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
     });
 
     if (!stockPool) {
-      // 如果没有股票池，返回默认的科技股列表
-      return ['NVDA', 'TSLA', 'AAPL', 'MSFT', 'GOOGL', 'META', 'AMZN', 'AMD', 'NFLX', 'BABA'];
+      // 如果没有股票池，从环境变量读取默认股票池
+      const defaultPool =
+        process.env.DEFAULT_STOCK_POOL ||
+        "NVDA,TSLA,AAPL,MSFT,GOOGL,META,AMZN,AMD,NFLX,BABA";
+      const symbols = defaultPool
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+
+      logger.info(`使用默认股票池: ${symbols.join(", ")}`);
+      return symbols;
     }
 
     return JSON.parse(stockPool.symbols);
   }
 }
-

@@ -1,9 +1,10 @@
 // 战报生成服务
 
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
+import { Logger } from '../lib/logger';
 import { PortfolioService } from './portfolio.service';
 
-const prisma = new PrismaClient();
+const logger = Logger.create('ReportService');
 
 export interface DailyReportData {
   day: number;
@@ -53,7 +54,7 @@ export class ReportService {
   async generateDailyReport(date?: Date): Promise<string> {
     const reportDate = date || new Date();
     
-    console.log(`[ReportService] Generating daily report for ${reportDate.toISOString().split('T')[0]}`);
+    logger.info(`Generating daily report for ${reportDate.toISOString().split('T')[0]}`);
 
     try {
       // 1. 计算当前是第几天
@@ -95,7 +96,7 @@ export class ReportService {
 
       for (const model of models) {
         if (!model.portfolio) {
-          console.warn(`[ReportService] Model ${model.name} has no portfolio, skipping`);
+          logger.warn(`Model ${model.name} has no portfolio, skipping`);
           continue;
         }
 
@@ -183,11 +184,11 @@ export class ReportService {
         },
       });
 
-      console.log(`[ReportService] Daily report created: Day ${dayNumber}, ID: ${report.id}`);
+      logger.info(`Daily report created: Day ${dayNumber}, ID: ${report.id}`);
 
       return report.id;
     } catch (error: any) {
-      console.error('[ReportService] Failed to generate daily report:', error);
+      logger.error('Failed to generate daily report', error);
       throw error;
     }
   }

@@ -1,298 +1,155 @@
 // DeepSeek LLM 适配器
+// 基于 OpenAI SDK，支持自动重试和错误处理
 
-import axios from 'axios';
-import { ILLMProvider, LLMConfig } from './interface';
-import { TradeDecision, ReflectionInput, ReflectionOutput, StockPickerInput, StockRecommendation } from '../../types';
+import { Logger } from "../../lib/logger";
+import {
+  TradeDecision,
+  ReflectionInput,
+  ReflectionOutput,
+  StockPickerInput,
+  StockRecommendation,
+  SingleStockAnalysisInput,
+  SingleStockAnalysisOutput,
+} from "../../types";
+import { BaseAdapter } from "./base.adapter";
+import { PromptBuilder, AnalysisContext } from "./prompt.builder";
+import { ResponseParser } from "./response.parser";
 
-export class DeepSeekAdapter implements ILLMProvider {
-  private config: LLMConfig | null = null;
+const logger = Logger.create("DeepSeekAdapter");
 
-  initialize(config: LLMConfig): void {
-    this.config = config;
+/**
+ * DeepSeek LLM 适配器
+ * 使用 OpenAI 兼容的 API
+ */
+export class DeepSeekAdapter extends BaseAdapter {
+  protected getProviderName(): string {
+    return "DeepSeek";
   }
 
-  async analyze(context: {
-    stockPool: string[];
-    marketData: Record<string, any>;
-    newsData: any[];
-    portfolio: any;
-    reflections: string[];
-  }): Promise<TradeDecision[]> {
-    if (!this.config) {
-      throw new Error('DeepSeekAdapter not initialized');
-    }
+  /**
+   * 分析市场并做出交易决策
+   */
+  async analyze(context: AnalysisContext): Promise<TradeDecision[]> {
+    this.ensureInitialized();
 
-    // 构建 Prompt
-    const prompt = this.buildAnalysisPrompt(context);
+    logger.info("开始分析市场数据...");
+
+    // 构建提示词
+    const prompt = PromptBuilder.buildAnalysisPrompt(context);
 
     try {
-      const response = await axios.post(
-        this.config.apiUrl,
-        {
-          model: this.config.modelId,
-          messages: [
-            {
-              role: 'system',
-              content: 'You are an expert AI trader. Analyze market data and news to make informed trading decisions.',
-            },
-            {
-              role: 'user',
-              content: prompt,
-            },
-          ],
-          temperature: 0.7,
-          max_tokens: 4000,
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${this.config.apiKey}`,
-          },
-        }
-      );
+      // 调用 API（带重试机制）
+      const content = await this.callChatAPI(prompt, {
+        systemPrompt: PromptBuilder.SYSTEM_PROMPT_ANALYSIS,
+        temperature: parseFloat(process.env.LLM_TEMPERATURE_ANALYSIS || "0.7"),
+        maxTokens: parseInt(process.env.LLM_MAX_TOKENS_ANALYSIS || "4000", 10),
+      });
 
-      // 解析 LLM 返回的 JSON 格式决策
-      const content = response.data.choices[0].message.content;
-      return this.parseDecisions(content);
+      // 解析响应
+      const decisions = ResponseParser.parseDecisions(content);
+
+      logger.info(`成功生成 ${decisions.length} 个交易决策`);
+      return decisions;
     } catch (error: any) {
-      console.error('DeepSeek API Error:', error.message);
-      throw new Error(`DeepSeek analysis failed: ${error.message}`);
+      logger.error("分析失败", error);
+      throw error;
     }
   }
 
+  /**
+   * 对历史交易进行反思
+   */
   async reflect(input: ReflectionInput): Promise<ReflectionOutput> {
-    if (!this.config) {
-      throw new Error('DeepSeekAdapter not initialized');
-    }
+    this.ensureInitialized();
 
-    const prompt = this.buildReflectionPrompt(input);
+    logger.info(`开始反思交易：${input.symbol}`);
+
+    // 构建提示词
+    const prompt = PromptBuilder.buildReflectionPrompt(input);
 
     try {
-      const response = await axios.post(
-        this.config.apiUrl,
-        {
-          model: this.config.modelId,
-          messages: [
-            {
-              role: 'system',
-              content: 'You are an expert trader reflecting on past trades to extract valuable lessons.',
-            },
-            {
-              role: 'user',
-              content: prompt,
-            },
-          ],
-          temperature: 0.8,
-          max_tokens: 1000,
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${this.config.apiKey}`,
-          },
-        }
-      );
+      // 调用 API（带重试机制）
+      const content = await this.callChatAPI(prompt, {
+        systemPrompt: PromptBuilder.SYSTEM_PROMPT_REFLECTION,
+        temperature: parseFloat(
+          process.env.LLM_TEMPERATURE_REFLECTION || "0.8"
+        ),
+        maxTokens: parseInt(
+          process.env.LLM_MAX_TOKENS_REFLECTION || "1000",
+          10
+        ),
+      });
 
-      const content = response.data.choices[0].message.content;
-      return this.parseReflection(content);
+      // 解析响应
+      const reflection = ResponseParser.parseReflection(content);
+
+      logger.info("反思完成", { score: reflection.score });
+      return reflection;
     } catch (error: any) {
-      console.error('DeepSeek Reflection Error:', error.message);
-      throw new Error(`DeepSeek reflection failed: ${error.message}`);
+      logger.error("反思失败", error);
+      throw error;
     }
   }
 
+  /**
+   * 根据用户条件推荐股票
+   */
   async pickStocks(input: StockPickerInput): Promise<StockRecommendation[]> {
-    if (!this.config) {
-      throw new Error('DeepSeekAdapter not initialized');
-    }
+    this.ensureInitialized();
 
-    const prompt = this.buildStockPickerPrompt(input);
+    logger.info(`开始 AI 选股：${input.criteria}`);
+
+    // 构建提示词
+    const prompt = PromptBuilder.buildStockPickerPrompt(input);
 
     try {
-      const response = await axios.post(
-        this.config.apiUrl,
-        {
-          model: this.config.modelId,
-          messages: [
-            {
-              role: 'system',
-              content: 'You are an expert stock analyst. Recommend stocks based on user criteria.',
-            },
-            {
-              role: 'user',
-              content: prompt,
-            },
-          ],
-          temperature: 0.7,
-          max_tokens: 2000,
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${this.config.apiKey}`,
-          },
-        }
-      );
+      // 调用 API（带重试机制）
+      const content = await this.callChatAPI(prompt, {
+        systemPrompt: PromptBuilder.SYSTEM_PROMPT_PICKER,
+        temperature: parseFloat(process.env.LLM_TEMPERATURE_PICKER || "0.7"),
+        maxTokens: parseInt(process.env.LLM_MAX_TOKENS_PICKER || "2000", 10),
+      });
 
-      const content = response.data.choices[0].message.content;
-      return this.parseStockRecommendations(content);
+      // 解析响应
+      const recommendations = ResponseParser.parseStockRecommendations(content);
+
+      logger.info(`成功推荐 ${recommendations.length} 只股票`);
+      return recommendations;
     } catch (error: any) {
-      console.error('DeepSeek Stock Picker Error:', error.message);
-      throw new Error(`DeepSeek stock picking failed: ${error.message}`);
+      logger.error("选股失败", error);
+      throw error;
     }
   }
 
-  // ========== 私有方法：Prompt 构建 ==========
+  /**
+   * 分析单一股票
+   */
+  async analyzeSingleStock(
+    input: SingleStockAnalysisInput
+  ): Promise<SingleStockAnalysisOutput> {
+    this.ensureInitialized();
 
-  private buildAnalysisPrompt(context: any): string {
-    return `
-You are an AI trader managing a portfolio. Analyze the current market situation and make trading decisions.
+    logger.info(`开始分析股票：${input.symbol}`);
 
-## Current Portfolio
-- Cash: $${context.portfolio.cash.toFixed(2)}
-- Total Value: $${context.portfolio.totalValue.toFixed(2)}
-- Positions: ${JSON.stringify(context.portfolio.positions, null, 2)}
+    // 构建提示词
+    const prompt = PromptBuilder.buildSingleStockAnalysisPrompt(input);
 
-## Stock Pool
-${context.stockPool.join(', ')}
-
-## Market Data (Recent Prices)
-${JSON.stringify(context.marketData, null, 2)}
-
-## Recent News & Sentiment
-${JSON.stringify(context.newsData, null, 2)}
-
-## Your Past Reflections (Lessons Learned)
-${context.reflections.length > 0 ? context.reflections.join('\n\n') : 'No reflections yet.'}
-
-## Constraints
-- Maximum position size per stock: 20% of total portfolio
-- Maximum total position: 80% (keep at least 20% cash)
-- Only trade stocks in the stock pool
-
-## Task
-Based on the above information, decide which stocks to BUY, SELL, or HOLD. For each decision, provide:
-1. Symbol
-2. Action (BUY/SELL/HOLD)
-3. Position Size (0-1, representing % of portfolio)
-4. Rationale (your reasoning)
-5. Confidence (0-1)
-
-**Output format (JSON array):**
-[
-  {
-    "symbol": "NVDA",
-    "action": "BUY",
-    "positionSize": 0.15,
-    "rationale": "Strong earnings beat and positive sentiment...",
-    "confidence": 0.85
-  },
-  ...
-]
-`;
-  }
-
-  private buildReflectionPrompt(input: ReflectionInput): string {
-    return `
-You previously made a trading decision. Now reflect on the outcome and extract lessons.
-
-## Trade Details
-- Symbol: ${input.symbol}
-- Action: ${input.side}
-- Quantity: ${input.quantity}
-- Entry Price: $${input.entryPrice.toFixed(2)}
-- Exit Price: $${input.exitPrice.toFixed(2)}
-- P&L: $${input.pnl.toFixed(2)} (${input.pnlPct.toFixed(2)}%)
-
-## Your Original Rationale
-"${input.rationale}"
-
-## What Happened During the Trade
-- Price Change: ${input.marketContext.priceChange.toFixed(2)}%
-- Key News Events: ${input.marketContext.newsEvents.join('; ')}
-
-## Task
-Reflect on this trade. What went well? What went wrong? What lesson should you remember for future trades?
-
-**Output format (JSON):**
-{
-  "content": "Your reflection as a concise lesson (2-3 sentences)",
-  "score": 7  // 1-10, importance of this lesson
-}
-`;
-  }
-
-  private buildStockPickerPrompt(input: StockPickerInput): string {
-    return `
-You are a stock analyst. The user wants you to recommend stocks based on specific criteria.
-
-## User Request
-"${input.criteria}"
-
-## Task
-Analyze the US stock market and recommend ${input.maxResults} stocks that match the criteria.
-For each stock, provide:
-1. Symbol (ticker)
-2. Company Name
-3. Reason (why it matches the criteria)
-4. Score (0-100, how well it matches)
-
-**Output format (JSON array):**
-[
-  {
-    "symbol": "NVDA",
-    "name": "NVIDIA Corporation",
-    "reason": "Leading AI chip maker with strong revenue growth...",
-    "score": 95
-  },
-  ...
-]
-`;
-  }
-
-  // ========== 私有方法：响应解析 ==========
-
-  private parseDecisions(content: string): TradeDecision[] {
     try {
-      // 尝试提取 JSON
-      const jsonMatch = content.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) {
-        throw new Error('No JSON array found in response');
-      }
-      return JSON.parse(jsonMatch[0]);
-    } catch (error) {
-      console.error('Failed to parse decisions:', content);
-      return [];
-    }
-  }
+      // 调用 API（带重试机制）
+      const content = await this.callChatAPI(prompt, {
+        systemPrompt: PromptBuilder.SYSTEM_PROMPT_SINGLE_STOCK,
+        temperature: parseFloat(process.env.LLM_TEMPERATURE_ANALYSIS || "0.7"),
+        maxTokens: parseInt(process.env.LLM_MAX_TOKENS_ANALYSIS || "4000", 10),
+      });
 
-  private parseReflection(content: string): ReflectionOutput {
-    try {
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error('No JSON object found in response');
-      }
-      return JSON.parse(jsonMatch[0]);
-    } catch (error) {
-      console.error('Failed to parse reflection:', content);
-      return {
-        content: 'Failed to generate reflection.',
-        score: 1,
-      };
-    }
-  }
+      // 解析响应
+      const analysis = ResponseParser.parseSingleStockAnalysis(content);
 
-  private parseStockRecommendations(content: string): StockRecommendation[] {
-    try {
-      const jsonMatch = content.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) {
-        throw new Error('No JSON array found in response');
-      }
-      return JSON.parse(jsonMatch[0]);
-    } catch (error) {
-      console.error('Failed to parse stock recommendations:', content);
-      return [];
+      logger.info(`成功分析股票 ${input.symbol}`);
+      return analysis;
+    } catch (error: any) {
+      logger.error("股票分析失败", error);
+      throw error;
     }
   }
 }
-

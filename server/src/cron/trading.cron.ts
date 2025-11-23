@@ -1,18 +1,28 @@
 // 定时任务：交易分析和反思
 
 import cron from 'node-cron';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
+import { Logger } from '../lib/logger';
+import { llmAdapterFactory } from '../factories/llm-adapter.factory';
 import { BrainService } from '../services/brain.service';
 import { ReflectionService } from '../services/reflection.service';
 import { PortfolioService } from '../services/portfolio.service';
 import { StockPickerService } from '../services/stockpicker.service';
 import { ReportService } from '../services/report.service';
-import { DeepSeekAdapter } from '../adapters/llm/deepseek.adapter';
-import { QwenAdapter } from '../adapters/llm/qwen.adapter';
 import { MockMarketDataProvider, MockNewsDataProvider } from '../adapters/data/mock.adapter';
 import { WebSocketServer } from '../websocket/server';
+import { ILLMProvider } from '../adapters/llm/interface';
 
-const prisma = new PrismaClient();
+const logger = Logger.create('TradingCron');
+
+/**
+ * 定时任务锁状态
+ */
+interface TaskLock {
+  premarketAnalysis: boolean;
+  postmarketReflection: boolean;
+  dailyReport: boolean;
+}
 
 export class TradingCron {
   private wsServer: WebSocketServer;
@@ -21,6 +31,13 @@ export class TradingCron {
   private reportService: ReportService;
   private marketDataProvider: MockMarketDataProvider;
   private newsDataProvider: MockNewsDataProvider;
+  
+  // 任务执行锁（防止重复执行）
+  private taskLocks: TaskLock = {
+    premarketAnalysis: false,
+    postmarketReflection: false,
+    dailyReport: false,
+  };
 
   constructor(wsServer: WebSocketServer) {
     this.wsServer = wsServer;
@@ -29,13 +46,8 @@ export class TradingCron {
     this.marketDataProvider = new MockMarketDataProvider();
     this.newsDataProvider = new MockNewsDataProvider();
 
-    // 初始化选股服务
-    const deepseekAdapter = new DeepSeekAdapter();
-    deepseekAdapter.initialize({
-      apiKey: process.env.DEEPSEEK_API_KEY || '',
-      apiUrl: process.env.DEEPSEEK_API_URL || '',
-      modelId: 'deepseek-chat',
-    });
+    // 初始化选股服务（使用工厂）
+    const deepseekAdapter = llmAdapterFactory.getAdapterByModelName('deepseek');
     this.stockPickerService = new StockPickerService(deepseekAdapter);
   }
 
@@ -51,7 +63,7 @@ export class TradingCron {
       this.runPremarketAnalysis();
     });
 
-    console.log(`[TradingCron] Premarket analysis scheduled: ${premarketCron}`);
+    logger.info(`Premarket analysis scheduled: ${premarketCron}`);
 
     // 盘后反思任务：每天美东时间 4:30 PM
     const postmarketCron = process.env.POSTMARKET_REFLECTION_CRON || '30 16 * * 1-5';
@@ -59,7 +71,7 @@ export class TradingCron {
       this.runPostmarketReflection();
     });
 
-    console.log(`[TradingCron] Postmarket reflection scheduled: ${postmarketCron}`);
+    logger.info(`Postmarket reflection scheduled: ${postmarketCron}`);
 
     // 每日战报生成任务：每天美东时间 5:00 PM (盘后半小时)
     const reportCron = process.env.DAILY_REPORT_CRON || '0 17 * * 1-5';
@@ -67,11 +79,11 @@ export class TradingCron {
       this.generateDailyReport();
     });
 
-    console.log(`[TradingCron] Daily report generation scheduled: ${reportCron}`);
+    logger.info(`Daily report generation scheduled: ${reportCron}`);
 
     // 开发模式：立即执行一次（用于测试）
     if (process.env.NODE_ENV === 'development') {
-      console.log('[TradingCron] Development mode: running analysis immediately...');
+      logger.info('Development mode: running analysis immediately...');
       setTimeout(() => {
         this.runPremarketAnalysis();
       }, 5000); // 延迟 5 秒启动
@@ -82,64 +94,121 @@ export class TradingCron {
    * 盘前分析：让所有模型分析市场并执行交易
    */
   private async runPremarketAnalysis(): Promise<void> {
-    console.log('[TradingCron] === Premarket Analysis Started ===');
+    // 检查任务锁
+    if (this.taskLocks.premarketAnalysis) {
+      logger.warn('Premarket analysis is already running, skipping...');
+      return;
+    }
+
+    // 加锁
+    this.taskLocks.premarketAnalysis = true;
 
     try {
+      logger.info('=== Premarket Analysis Started ===');
+
       // 1. 获取活跃的股票池
-      const stockPool = await this.stockPickerService.getActiveStockPool();
-      console.log(`[TradingCron] Stock pool: ${stockPool.join(', ')}`);
-
+      const stockPool = await this.getStockPool();
+      
       // 2. 获取所有启用的模型
-      const models = await prisma.model.findMany({
-        where: { enabled: true },
-      });
+      const models = await this.getActiveModels();
 
-      console.log(`[TradingCron] Found ${models.length} active models`);
+      logger.info(`Found ${models.length} active models`);
 
-      // 3. 为每个模型执行分析
-      for (const model of models) {
-        try {
-          await this.analyzeAndTrade(model.id, model.name, stockPool);
-        } catch (error: any) {
-          console.error(`[TradingCron] Error analyzing for model ${model.name}:`, error.message);
-          this.wsServer.sendError(`Failed to analyze for ${model.name}: ${error.message}`);
-        }
-      }
+      // 3. 并发分析所有模型（使用 Promise.allSettled 避免单个失败影响其他）
+      await this.analyzeAllModels(models, stockPool);
 
-      console.log('[TradingCron] === Premarket Analysis Completed ===');
+      logger.info('=== Premarket Analysis Completed ===');
     } catch (error: any) {
-      console.error('[TradingCron] Premarket analysis failed:', error.message);
+      logger.error('Premarket analysis failed', error);
       this.wsServer.sendError(`Premarket analysis failed: ${error.message}`);
+    } finally {
+      // 释放锁
+      this.taskLocks.premarketAnalysis = false;
     }
+  }
+
+  /**
+   * 获取股票池
+   */
+  private async getStockPool(): Promise<string[]> {
+    const stockPool = await this.stockPickerService.getActiveStockPool();
+    logger.info(`Stock pool: ${stockPool.join(', ')}`);
+    return stockPool;
+  }
+
+  /**
+   * 获取所有启用的模型
+   */
+  private async getActiveModels() {
+    const models = await prisma.model.findMany({
+      where: { enabled: true },
+    });
+    return models;
+  }
+
+  /**
+   * 并发分析所有模型
+   */
+  private async analyzeAllModels(models: any[], stockPool: string[]): Promise<void> {
+    const results = await Promise.allSettled(
+      models.map(model => this.analyzeAndTrade(model.id, model.name, stockPool))
+    );
+
+    // 检查结果并记录失败的模型
+    results.forEach((result, index) => {
+      const model = models[index];
+      if (result.status === 'rejected') {
+        logger.error(`Failed to analyze model ${model.name}`, result.reason);
+        this.wsServer.sendError(`Failed to analyze ${model.name}: ${result.reason.message}`);
+      }
+    });
   }
 
   /**
    * 为单个模型执行分析和交易
    */
   private async analyzeAndTrade(modelId: string, modelName: string, stockPool: string[]): Promise<void> {
-    console.log(`[TradingCron] Analyzing for model: ${modelName}`);
+    logger.info(`Analyzing for model: ${modelName}`);
 
-    // 初始化对应的 LLM 适配器
-    let llmProvider;
-    if (modelName.toLowerCase().includes('deepseek')) {
-      llmProvider = new DeepSeekAdapter();
-      llmProvider.initialize({
-        apiKey: process.env.DEEPSEEK_API_KEY || '',
-        apiUrl: process.env.DEEPSEEK_API_URL || '',
-        modelId: 'deepseek-chat',
-      });
-    } else if (modelName.toLowerCase().includes('qwen')) {
-      llmProvider = new QwenAdapter();
-      llmProvider.initialize({
-        apiKey: process.env.QWEN_API_KEY || '',
-        apiUrl: process.env.QWEN_API_URL || '',
-        modelId: 'qwen-max',
-      });
-    } else {
-      throw new Error(`Unknown model type: ${modelName}`);
+    try {
+      // 1. 获取 LLM 适配器
+      const llmProvider = this.getLLMProvider(modelName);
+
+      // 2. 创建 BrainService 并执行分析
+      const decisions = await this.performAnalysis(modelId, modelName, llmProvider, stockPool);
+
+      // 3. 执行交易
+      await this.executeTrades(modelId, modelName, llmProvider, decisions);
+
+      // 4. 更新持仓价格
+      await this.updatePositionPrices(modelId, stockPool);
+
+      // 5. 推送更新到前端
+      await this.sendPortfolioUpdate(modelId);
+
+      logger.info(`${modelName} analysis completed successfully`);
+    } catch (error: any) {
+      logger.error(`Error analyzing model ${modelName}`, error);
+      throw error; // 重新抛出错误供上层处理
     }
+  }
 
-    // 创建 BrainService
+  /**
+   * 获取 LLM 提供商适配器
+   */
+  private getLLMProvider(modelName: string): ILLMProvider {
+    return llmAdapterFactory.getAdapterByModelName(modelName);
+  }
+
+  /**
+   * 执行市场分析
+   */
+  private async performAnalysis(
+    modelId: string,
+    modelName: string,
+    llmProvider: ILLMProvider,
+    stockPool: string[]
+  ) {
     const brainService = new BrainService(
       llmProvider,
       this.marketDataProvider,
@@ -147,50 +216,89 @@ export class TradingCron {
       this.portfolioService
     );
 
-    // 执行分析
     this.wsServer.sendModelThinking(modelId, `${modelName} is analyzing market data...`);
     const decisions = await brainService.analyze(modelId, stockPool);
-
+    
     this.wsServer.sendModelThinking(modelId, `${modelName} generated ${decisions.length} trading decisions`);
+    logger.debug(`${modelName} generated ${decisions.length} decisions`);
 
-    // 执行交易
+    return decisions;
+  }
+
+  /**
+   * 执行交易决策
+   */
+  private async executeTrades(
+    modelId: string,
+    modelName: string,
+    llmProvider: ILLMProvider,
+    decisions: any[]
+  ): Promise<void> {
+    const brainService = new BrainService(
+      llmProvider,
+      this.marketDataProvider,
+      this.newsDataProvider,
+      this.portfolioService
+    );
+
     await brainService.executeTrades(modelId, decisions);
+    logger.debug(`${modelName} executed ${decisions.length} trades`);
+  }
 
-    // 更新持仓价格
+  /**
+   * 更新持仓价格
+   */
+  private async updatePositionPrices(modelId: string, stockPool: string[]): Promise<void> {
     const currentPrices = await this.marketDataProvider.getCurrentPrices(stockPool);
     await this.portfolioService.updatePositionPrices(modelId, currentPrices);
+  }
 
-    // 获取更新后的投资组合状态
+  /**
+   * 发送投资组合更新到前端
+   */
+  private async sendPortfolioUpdate(modelId: string): Promise<void> {
     const portfolio = await this.portfolioService.getPortfolioStatus(modelId);
-
-    // 推送更新到前端
     this.wsServer.sendPortfolioUpdate(modelId, portfolio);
-
-    console.log(`[TradingCron] ${modelName} analysis completed. Portfolio value: $${portfolio.totalValue.toFixed(2)}`);
+    logger.info(`Portfolio value: $${portfolio.totalValue.toFixed(2)}`);
   }
 
   /**
    * 盘后反思：触发反思流程
    */
   private async runPostmarketReflection(): Promise<void> {
-    console.log('[TradingCron] === Postmarket Reflection Started ===');
+    // 检查任务锁
+    if (this.taskLocks.postmarketReflection) {
+      logger.warn('Postmarket reflection is already running, skipping...');
+      return;
+    }
+
+    // 加锁
+    this.taskLocks.postmarketReflection = true;
 
     try {
-      const models = await prisma.model.findMany({
-        where: { enabled: true },
+      logger.info('=== Postmarket Reflection Started ===');
+
+      const models = await this.getActiveModels();
+
+      // 并发执行反思
+      const results = await Promise.allSettled(
+        models.map(model => this.reflectForModel(model.id, model.name))
+      );
+
+      // 检查结果
+      results.forEach((result, index) => {
+        const model = models[index];
+        if (result.status === 'rejected') {
+          logger.error(`Failed to reflect for model ${model.name}`, result.reason);
+        }
       });
 
-      for (const model of models) {
-        try {
-          await this.reflectForModel(model.id, model.name);
-        } catch (error: any) {
-          console.error(`[TradingCron] Error reflecting for model ${model.name}:`, error.message);
-        }
-      }
-
-      console.log('[TradingCron] === Postmarket Reflection Completed ===');
+      logger.info('=== Postmarket Reflection Completed ===');
     } catch (error: any) {
-      console.error('[TradingCron] Postmarket reflection failed:', error.message);
+      logger.error('Postmarket reflection failed', error);
+    } finally {
+      // 释放锁
+      this.taskLocks.postmarketReflection = false;
     }
   }
 
@@ -198,46 +306,54 @@ export class TradingCron {
    * 为单个模型执行反思
    */
   private async reflectForModel(modelId: string, modelName: string): Promise<void> {
-    // 初始化对应的 LLM 适配器
-    let llmProvider;
-    if (modelName.toLowerCase().includes('deepseek')) {
-      llmProvider = new DeepSeekAdapter();
-      llmProvider.initialize({
-        apiKey: process.env.DEEPSEEK_API_KEY || '',
-        apiUrl: process.env.DEEPSEEK_API_URL || '',
-        modelId: 'deepseek-chat',
-      });
-    } else if (modelName.toLowerCase().includes('qwen')) {
-      llmProvider = new QwenAdapter();
-      llmProvider.initialize({
-        apiKey: process.env.QWEN_API_KEY || '',
-        apiUrl: process.env.QWEN_API_URL || '',
-        modelId: 'qwen-max',
-      });
-    } else {
-      return;
+    try {
+      logger.info(`Reflecting for model: ${modelName}`);
+
+      // 获取 LLM 适配器
+      const llmProvider = this.getLLMProvider(modelName);
+
+      // 创建反思服务
+      const reflectionService = new ReflectionService(
+        llmProvider,
+        this.marketDataProvider,
+        this.newsDataProvider
+      );
+
+      // 执行反思
+      const reflectionDays = parseInt(process.env.REFLECTION_DAYS || '5');
+      await reflectionService.triggerReflections(reflectionDays);
+
+      logger.info(`Reflection completed for ${modelName}`);
+    } catch (error: any) {
+      logger.error(`Error reflecting for model ${modelName}`, error);
+      throw error;
     }
-
-    const reflectionService = new ReflectionService(llmProvider, this.marketDataProvider, this.newsDataProvider);
-
-    const reflectionDays = parseInt(process.env.REFLECTION_DAYS || '5');
-    await reflectionService.triggerReflections(reflectionDays);
-
-    console.log(`[TradingCron] Reflection completed for ${modelName}`);
   }
 
   /**
    * 生成每日战报
    */
   private async generateDailyReport(): Promise<void> {
-    console.log('[TradingCron] === Generating Daily Report ===');
+    // 检查任务锁
+    if (this.taskLocks.dailyReport) {
+      logger.warn('Daily report generation is already running, skipping...');
+      return;
+    }
+
+    // 加锁
+    this.taskLocks.dailyReport = true;
 
     try {
+      logger.info('=== Generating Daily Report ===');
+
       const reportId = await this.reportService.generateDailyReport();
-      console.log(`[TradingCron] Daily report generated successfully: ${reportId}`);
+      
+      logger.info(`Daily report generated successfully: ${reportId}`);
     } catch (error: any) {
-      console.error('[TradingCron] Failed to generate daily report:', error.message);
+      logger.error('Failed to generate daily report', error);
+    } finally {
+      // 释放锁
+      this.taskLocks.dailyReport = false;
     }
   }
 }
-

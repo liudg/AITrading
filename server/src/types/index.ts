@@ -82,6 +82,20 @@ export interface StockRecommendation {
   score: number; // 评分 0-100
 }
 
+export interface SingleStockAnalysisInput {
+  symbol: string; // 股票代码
+  criteria?: string; // 分析维度（可选）
+}
+
+export interface SingleStockAnalysisOutput {
+  symbol: string;
+  name: string;
+  score: number; // 评分 0-10
+  analysis: string; // 详细分析报告
+  recommendation: '买入' | '观望' | '卖出'; // 投资建议
+  reason: string; // 建议理由
+}
+
 // WebSocket 消息类型
 export enum WSMessageType {
   PORTFOLIO_UPDATE = 'portfolio_update',

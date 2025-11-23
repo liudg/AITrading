@@ -3,7 +3,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import axios from 'axios';
-import type { Model, Portfolio, Trade, Reflection, StockRecommendation } from '@/types';
+import type { Model, Portfolio, Trade, Reflection, StockRecommendation, SingleStockAnalysis } from '@/types';
 
 const API_BASE = '/api';
 
@@ -125,6 +125,22 @@ export const useTradingStore = defineStore('trading', () => {
     }
   }
 
+  async function analyzeSingleStock(symbol: string, criteria?: string): Promise<SingleStockAnalysis> {
+    try {
+      loading.value = true;
+      const response = await axios.post(`${API_BASE}/stock-analysis`, {
+        symbol,
+        criteria,
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Failed to analyze stock:', error);
+      throw error;
+    } finally {
+      loading.value = false;
+    }
+  }
+
   function updatePortfolio(modelId: string, portfolio: Portfolio) {
     portfolios.value[modelId] = portfolio;
   }
@@ -169,6 +185,7 @@ export const useTradingStore = defineStore('trading', () => {
     fetchStockPool,
     pickStocks,
     saveStockPool,
+    analyzeSingleStock,
     updatePortfolio,
     addTrade,
     addReflection,

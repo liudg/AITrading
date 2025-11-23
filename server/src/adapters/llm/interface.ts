@@ -1,6 +1,6 @@
 // LLM 提供商统一接口
 
-import { TradeDecision, ReflectionInput, ReflectionOutput, StockPickerInput, StockRecommendation } from '../../types';
+import { TradeDecision, ReflectionInput, ReflectionOutput, StockPickerInput, StockRecommendation, SingleStockAnalysisInput, SingleStockAnalysisOutput } from '../../types';
 
 export interface LLMConfig {
   apiKey: string;
@@ -43,5 +43,12 @@ export interface ILLMProvider {
    * @returns 推荐的股票列表
    */
   pickStocks(input: StockPickerInput): Promise<StockRecommendation[]>;
+
+  /**
+   * 单一股票分析方法
+   * @param input 股票代码和分析维度
+   * @returns 详细分析结果
+   */
+  analyzeSingleStock(input: SingleStockAnalysisInput): Promise<SingleStockAnalysisOutput>;
 }
 

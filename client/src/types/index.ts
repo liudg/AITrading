@@ -68,6 +68,15 @@ export interface StockRecommendation {
   score: number;
 }
 
+export interface SingleStockAnalysis {
+  symbol: string;
+  name: string;
+  score: number;
+  analysis: string;
+  recommendation: string;
+  reason: string;
+}
+
 export interface WSMessage {
   type: WSMessageType;
   payload: any;

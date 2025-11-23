@@ -366,17 +366,10 @@ async function performSingleAnalysis() {
     singleLoading.value = true;
     
     // 调用后端API进行单一股票分析
-    // 这里暂时使用模拟数据，实际应该调用真实API
-    await new Promise(resolve => setTimeout(resolve, 2000)); // 模拟API延迟
-    
-    singleAnalysis.value = {
-      symbol: singleSymbol.value,
-      name: getStockName(singleSymbol.value),
-      score: Math.floor(Math.random() * 3) + 7, // 7-10分
-      analysis: generateMockAnalysis(singleSymbol.value),
-      recommendation: ['买入', '观望', '买入'][Math.floor(Math.random() * 3)],
-      reason: '综合考虑技术面、基本面和市场情绪，该股票当前具有较好的投资价值。',
-    };
+    singleAnalysis.value = await tradingStore.analyzeSingleStock(
+      singleSymbol.value,
+      singleCriteria.value || undefined
+    );
   } catch (error) {
     alert('AI 分析失败，请重试');
     console.error(error);
@@ -405,35 +398,6 @@ function resetSingleForm() {
   singleSymbol.value = '';
   singleCriteria.value = '';
   singleAnalysis.value = null;
-}
-
-// Helper functions
-function getStockName(symbol: string): string {
-  const names: Record<string, string> = {
-    NVDA: 'NVIDIA Corporation',
-    TSLA: 'Tesla, Inc.',
-    AAPL: 'Apple Inc.',
-    MSFT: 'Microsoft Corporation',
-    GOOGL: 'Alphabet Inc.',
-    META: 'Meta Platforms, Inc.',
-    AMZN: 'Amazon.com, Inc.',
-    AMD: 'Advanced Micro Devices, Inc.',
-  };
-  return names[symbol] || `${symbol} Inc.`;
-}
-
-function generateMockAnalysis(symbol: string): string {
-  return `【技术面分析】
-${symbol} 当前处于上升通道中，均线系统呈现多头排列。MACD指标金叉，RSI指标处于50-70区间，显示出较强的上涨动能。成交量持续放大，市场参与度较高。
-
-【基本面分析】
-公司业绩表现稳健，最近一季度营收同比增长15%，净利润增长20%。市盈率PE为28倍，低于行业平均水平，估值合理。公司在其细分领域具有领先地位，市场份额稳定增长。
-
-【市场情绪分析】
-近期新闻面偏正面，机构投资者持续增持。社交媒体讨论热度较高，市场情绪乐观。行业整体处于景气周期，政策环境有利。
-
-【风险提示】
-需关注宏观经济波动、行业竞争加剧、技术创新风险等因素。建议设置止损位，控制仓位在合理范围内。`;
 }
 </script>
 

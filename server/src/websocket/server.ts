@@ -2,7 +2,10 @@
 
 import { Server as SocketIOServer } from 'socket.io';
 import { Server as HTTPServer } from 'http';
+import { Logger } from '../lib/logger';
 import { WSMessage, WSMessageType } from '../types';
+
+const logger = Logger.create('WebSocket');
 
 export class WebSocketServer {
   private io: SocketIOServer;
@@ -20,20 +23,20 @@ export class WebSocketServer {
 
   private setupHandlers(): void {
     this.io.on('connection', (socket) => {
-      console.log(`[WebSocket] Client connected: ${socket.id}`);
+      logger.info(`Client connected: ${socket.id}`);
 
       socket.on('disconnect', () => {
-        console.log(`[WebSocket] Client disconnected: ${socket.id}`);
+        logger.info(`Client disconnected: ${socket.id}`);
       });
 
       socket.on('subscribe', (room: string) => {
         socket.join(room);
-        console.log(`[WebSocket] Client ${socket.id} joined room: ${room}`);
+        logger.debug(`Client ${socket.id} joined room: ${room}`);
       });
 
       socket.on('unsubscribe', (room: string) => {
         socket.leave(room);
-        console.log(`[WebSocket] Client ${socket.id} left room: ${room}`);
+        logger.debug(`Client ${socket.id} left room: ${room}`);
       });
     });
   }

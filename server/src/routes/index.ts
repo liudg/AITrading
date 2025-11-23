@@ -1,17 +1,17 @@
 // API 路由
 
 import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
+import { Logger } from '../lib/logger';
+import { llmAdapterFactory } from '../factories/llm-adapter.factory';
 import { PortfolioService } from '../services/portfolio.service';
 import { StockPickerService } from '../services/stockpicker.service';
 import { BrainService } from '../services/brain.service';
 import { ReportService } from '../services/report.service';
-import { DeepSeekAdapter } from '../adapters/llm/deepseek.adapter';
-import { QwenAdapter } from '../adapters/llm/qwen.adapter';
 import { MockMarketDataProvider, MockNewsDataProvider } from '../adapters/data/mock.adapter';
 
 const router = Router();
-const prisma = new PrismaClient();
+const logger = Logger.create('Routes');
 
 // 初始化服务（这里使用 Mock 数据，后续可以替换为真实 API）
 const portfolioService = new PortfolioService();
@@ -19,13 +19,8 @@ const marketDataProvider = new MockMarketDataProvider();
 const newsDataProvider = new MockNewsDataProvider();
 const reportService = new ReportService();
 
-// DeepSeek 选股服务
-const deepseekAdapter = new DeepSeekAdapter();
-deepseekAdapter.initialize({
-  apiKey: process.env.DEEPSEEK_API_KEY || '',
-  apiUrl: process.env.DEEPSEEK_API_URL || '',
-  modelId: 'deepseek-chat',
-});
+// DeepSeek 选股服务（使用工厂）
+const deepseekAdapter = llmAdapterFactory.getAdapterByModelName('deepseek');
 const stockPickerService = new StockPickerService(deepseekAdapter);
 
 // ========== 模型管理 ==========
@@ -38,6 +33,7 @@ router.get('/models', async (req: Request, res: Response) => {
     });
     res.json(models);
   } catch (error: any) {
+    logger.error('Failed to fetch models', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -56,8 +52,10 @@ router.post('/models', async (req: Request, res: Response) => {
     // 初始化投资组合
     await portfolioService.initializePortfolio(model.id);
 
+    logger.info(`Model created: ${name}`);
     res.json(model);
   } catch (error: any) {
+    logger.error('Failed to create model', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -70,6 +68,7 @@ router.get('/portfolio/:modelId', async (req: Request, res: Response) => {
     const portfolio = await portfolioService.getPortfolioStatus(modelId);
     res.json(portfolio);
   } catch (error: any) {
+    logger.error(`Failed to fetch portfolio for model ${req.params.modelId}`, error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -81,6 +80,7 @@ router.get('/portfolio/:modelId/history', async (req: Request, res: Response) =>
     const history = await portfolioService.getPortfolioHistory(modelId, parseInt(hours as string));
     res.json(history);
   } catch (error: any) {
+    logger.error(`Failed to fetch portfolio history for model ${req.params.modelId}`, error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -134,6 +134,7 @@ router.get('/trades', async (req: Request, res: Response) => {
 
     res.json(enrichedTrades);
   } catch (error: any) {
+    logger.error('Failed to fetch trades', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -155,6 +156,7 @@ router.get('/trades/:tradeId', async (req: Request, res: Response) => {
 
     res.json(trade);
   } catch (error: any) {
+    logger.error(`Failed to fetch trade ${req.params.tradeId}`, error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -180,6 +182,7 @@ router.get('/reflections', async (req: Request, res: Response) => {
 
     res.json(reflections);
   } catch (error: any) {
+    logger.error('Failed to fetch reflections', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -196,8 +199,28 @@ router.post('/stock-picker', async (req: Request, res: Response) => {
 
     const recommendations = await stockPickerService.pickStocks(criteria, maxResults);
 
+    logger.info(`Stock picker generated ${recommendations.length} recommendations`);
     res.json(recommendations);
   } catch (error: any) {
+    logger.error('Failed to pick stocks', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/stock-analysis', async (req: Request, res: Response) => {
+  try {
+    const { symbol, criteria } = req.body;
+
+    if (!symbol) {
+      return res.status(400).json({ error: 'Symbol is required' });
+    }
+
+    const analysis = await deepseekAdapter.analyzeSingleStock({ symbol, criteria });
+
+    logger.info(`Stock analysis completed for ${symbol}`);
+    res.json(analysis);
+  } catch (error: any) {
+    logger.error('Failed to analyze stock', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -212,8 +235,10 @@ router.post('/stock-pool', async (req: Request, res: Response) => {
 
     const poolId = await stockPickerService.saveStockPool(symbols, name || 'Custom Stock Pool', createdBy, reason);
 
+    logger.info(`Stock pool saved: ${poolId}`);
     res.json({ id: poolId, message: 'Stock pool saved successfully' });
   } catch (error: any) {
+    logger.error('Failed to save stock pool', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -223,6 +248,7 @@ router.get('/stock-pool', async (req: Request, res: Response) => {
     const symbols = await stockPickerService.getActiveStockPool();
     res.json({ symbols });
   } catch (error: any) {
+    logger.error('Failed to fetch stock pool', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -238,6 +264,7 @@ router.get('/market-data/:symbol', async (req: Request, res: Response) => {
 
     res.json(marketData[symbol] || []);
   } catch (error: any) {
+    logger.error(`Failed to fetch market data for ${req.params.symbol}`, error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -253,6 +280,7 @@ router.get('/news', async (req: Request, res: Response) => {
 
     res.json(news);
   } catch (error: any) {
+    logger.error('Failed to fetch news', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -275,6 +303,7 @@ router.get('/status', async (req: Request, res: Response) => {
       },
     });
   } catch (error: any) {
+    logger.error('Failed to fetch system status', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -288,6 +317,7 @@ router.get('/reports', async (req: Request, res: Response) => {
     const reports = await reportService.getReportsList(parseInt(limit as string));
     res.json(reports);
   } catch (error: any) {
+    logger.error('Failed to fetch reports list', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -300,8 +330,10 @@ router.get('/reports/:reportId', async (req: Request, res: Response) => {
     res.json(report);
   } catch (error: any) {
     if (error.message === 'Report not found') {
+      logger.warn(`Report not found: ${req.params.reportId}`);
       res.status(404).json({ error: error.message });
     } else {
+      logger.error(`Failed to fetch report ${req.params.reportId}`, error);
       res.status(500).json({ error: error.message });
     }
   }
@@ -315,8 +347,10 @@ router.get('/reports/day/:day', async (req: Request, res: Response) => {
     res.json(report);
   } catch (error: any) {
     if (error.message.includes('not found')) {
+      logger.warn(`Report not found for day ${req.params.day}`);
       res.status(404).json({ error: error.message });
     } else {
+      logger.error(`Failed to fetch report for day ${req.params.day}`, error);
       res.status(500).json({ error: error.message });
     }
   }
@@ -328,12 +362,15 @@ router.post('/reports/generate', async (req: Request, res: Response) => {
     const { date } = req.body;
     const reportDate = date ? new Date(date) : new Date();
     const reportId = await reportService.generateDailyReport(reportDate);
+    
+    logger.info(`Daily report generated: ${reportId}`);
     res.json({ 
       success: true, 
       reportId,
       message: 'Daily report generated successfully' 
     });
   } catch (error: any) {
+    logger.error('Failed to generate daily report', error);
     res.status(500).json({ error: error.message });
   }
 });

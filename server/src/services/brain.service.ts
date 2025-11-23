@@ -1,12 +1,13 @@
 // AI 决策引擎服务
 
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
+import { Logger } from '../lib/logger';
 import { ILLMProvider } from '../adapters/llm/interface';
 import { IMarketDataProvider, INewsDataProvider } from '../adapters/data/interface';
 import { TradeDecision } from '../types';
 import { PortfolioService } from './portfolio.service';
 
-const prisma = new PrismaClient();
+const logger = Logger.create('BrainService');
 
 export class BrainService {
   constructor(
@@ -46,7 +47,7 @@ export class BrainService {
       reflections: reflections.map((r) => r.content),
     });
 
-    console.log(`[BrainService] Model ${modelId} generated ${decisions.length} decisions`);
+    logger.info(`Model ${modelId} generated ${decisions.length} decisions`);
 
     return decisions;
   }
@@ -71,7 +72,7 @@ export class BrainService {
           await this.executeSell(modelId, decision, price);
         }
       } catch (error: any) {
-        console.error(`[BrainService] Failed to execute trade for ${decision.symbol}:`, error.message);
+        logger.error(`Failed to execute trade for ${decision.symbol}`, error);
       }
     }
   }
@@ -87,18 +88,18 @@ export class BrainService {
     const quantity = Math.floor(targetValue / price);
 
     if (quantity === 0) {
-      console.log(`[BrainService] Skipping BUY ${decision.symbol}: quantity would be 0`);
+      logger.debug(`Skipping BUY ${decision.symbol}: quantity would be 0`);
       return;
     }
 
-    // 检查仓位约束
+    // 检查仓位约束（预检查，executeBuy 内部也会再次检查）
     const check = this.portfolioService.canTrade(portfolio, decision.symbol, decision.positionSize);
     if (!check.allowed) {
-      console.log(`[BrainService] Skipping BUY ${decision.symbol}: ${check.reason}`);
+      logger.debug(`Skipping BUY ${decision.symbol}: ${check.reason}`);
       return;
     }
 
-    // 执行交易
+    // 执行交易（内部有事务保护和风控检查）
     await this.portfolioService.executeBuy(modelId, decision.symbol, quantity, price);
 
     // 记录交易
@@ -116,7 +117,7 @@ export class BrainService {
       },
     });
 
-    console.log(`[BrainService] Executed BUY ${quantity} ${decision.symbol} @ $${price.toFixed(2)}`);
+    logger.info(`Executed BUY ${quantity} ${decision.symbol} @ $${price.toFixed(2)}`);
   }
 
   /**
@@ -128,7 +129,7 @@ export class BrainService {
     // 查找当前持仓
     const position = portfolio.positions.find((p) => p.symbol === decision.symbol);
     if (!position || position.quantity === 0) {
-      console.log(`[BrainService] Skipping SELL ${decision.symbol}: no position`);
+      logger.debug(`Skipping SELL ${decision.symbol}: no position`);
       return;
     }
 
@@ -152,7 +153,7 @@ export class BrainService {
       },
     });
 
-    console.log(`[BrainService] Executed SELL ${position.quantity} ${decision.symbol} @ $${price.toFixed(2)}, P&L: $${pnl.toFixed(2)}`);
+    logger.info(`Executed SELL ${position.quantity} ${decision.symbol} @ $${price.toFixed(2)}, P&L: $${pnl.toFixed(2)}`);
   }
 
   /**

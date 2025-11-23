@@ -1,11 +1,12 @@
 // 反思服务
 
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
+import { Logger } from '../lib/logger';
 import { ILLMProvider } from '../adapters/llm/interface';
 import { IMarketDataProvider, INewsDataProvider } from '../adapters/data/interface';
 import { ReflectionInput } from '../types';
 
-const prisma = new PrismaClient();
+const logger = Logger.create('ReflectionService');
 
 export class ReflectionService {
   constructor(
@@ -36,13 +37,13 @@ export class ReflectionService {
       },
     });
 
-    console.log(`[ReflectionService] Found ${trades.length} trades for reflection`);
+    logger.info(`Found ${trades.length} trades for reflection`);
 
     for (const trade of trades) {
       try {
         await this.reflectOnTrade(trade.id);
       } catch (error: any) {
-        console.error(`[ReflectionService] Failed to reflect on trade ${trade.id}:`, error.message);
+        logger.error(`Failed to reflect on trade ${trade.id}`, error);
       }
     }
   }
@@ -76,7 +77,7 @@ export class ReflectionService {
     });
 
     if (!buyTrade) {
-      console.log(`[ReflectionService] No BUY trade found for ${trade.symbol}, skipping reflection`);
+      logger.debug(`No BUY trade found for ${trade.symbol}, skipping reflection`);
       return;
     }
 
@@ -123,7 +124,7 @@ export class ReflectionService {
       },
     });
 
-    console.log(`[ReflectionService] Created reflection for trade ${trade.id}: "${reflectionOutput.content}"`);
+    logger.info(`Created reflection for trade ${trade.id}: "${reflectionOutput.content}"`);
   }
 }
 
