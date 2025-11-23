@@ -53,9 +53,32 @@
           </div>
 
           <!-- Connection Status -->
-          <div class="flex items-center space-x-2 text-xs">
-            <div :class="['w-2 h-2 rounded-full', connected ? 'bg-cyber-green pulse-green' : 'bg-cyber-red']" />
-            <span class="text-gray-400">{{ connected ? '已连接' : '未连接' }}</span>
+          <div 
+            class="flex items-center space-x-2 px-3 py-1.5 rounded bg-cyber-light border border-cyber-gray cursor-pointer hover:border-cyber-green transition-colors"
+            @click="handleConnectionClick"
+            :title="lastError || getStatusText()"
+          >
+            <div :class="['w-2 h-2 rounded-full', getStatusDotClass()]" />
+            <span :class="['text-xs', getStatusColor()]">
+              {{ getStatusText() }}
+            </span>
+            <!-- 重连按钮 -->
+            <button
+              v-if="!connected && !isReconnecting"
+              @click.stop="handleReconnect"
+              class="ml-1 text-xs text-cyber-blue hover:text-cyber-green transition-colors"
+              title="点击重新连接"
+            >
+              🔄
+            </button>
+            <!-- 错误提示 -->
+            <span 
+              v-if="lastError"
+              class="ml-1 text-xs text-cyber-red"
+              :title="lastError"
+            >
+              ⚠️
+            </span>
           </div>
         </div>
       </div>
@@ -65,9 +88,17 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
-import { useWebSocket } from '@/composables/useWebSocket';
+import { useWebSocket, ConnectionStatus } from '@/composables/useWebSocket';
 
-const { connected } = useWebSocket();
+const { 
+  connected, 
+  isReconnecting, 
+  connectionStatus, 
+  lastError,
+  reconnect,
+  getStatusText,
+  getStatusColor,
+} = useWebSocket();
 
 interface MarketStatus {
   isOpen: boolean;
@@ -185,6 +216,40 @@ function formatDate(date: Date): string {
 // 更新市场状态
 function updateMarketStatus() {
   marketStatus.value = calculateMarketStatus();
+}
+
+/**
+ * 获取连接状态的圆点样式
+ */
+function getStatusDotClass(): string {
+  switch (connectionStatus.value) {
+    case ConnectionStatus.CONNECTED:
+      return 'bg-cyber-green pulse-green';
+    case ConnectionStatus.CONNECTING:
+    case ConnectionStatus.RECONNECTING:
+      return 'bg-yellow-400 animate-pulse';
+    case ConnectionStatus.ERROR:
+      return 'bg-cyber-red pulse-red';
+    default:
+      return 'bg-gray-500';
+  }
+}
+
+/**
+ * 点击连接状态
+ */
+function handleConnectionClick() {
+  if (lastError.value) {
+    alert(`连接错误：${lastError.value}\n\n点击右侧🔄图标尝试重新连接`);
+  }
+}
+
+/**
+ * 手动重连
+ */
+function handleReconnect() {
+  console.log('[Navbar] Manual reconnect triggered');
+  reconnect();
 }
 
 onMounted(() => {

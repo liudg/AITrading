@@ -54,33 +54,7 @@ async function main() {
     },
   });
 
-  const claude = await prisma.model.create({
-    data: {
-      name: "Claude-3.5-Sonnet",
-      displayName: "Claude 3.5 Sonnet",
-      apiConfig: JSON.stringify({
-        apiKey: process.env.CLAUDE_API_KEY || "test-key",
-        apiUrl: "https://api.anthropic.com",
-        modelId: "claude-3-5-sonnet-20241022",
-      }),
-      enabled: true,
-    },
-  });
-
-  const gpt = await prisma.model.create({
-    data: {
-      name: "GPT-4",
-      displayName: "GPT-4",
-      apiConfig: JSON.stringify({
-        apiKey: process.env.OPENAI_API_KEY || "test-key",
-        apiUrl: "https://api.openai.com",
-        modelId: "gpt-4",
-      }),
-      enabled: true,
-    },
-  });
-
-  console.log(`✓ 创建了 ${4} 个 AI 模型`);
+  console.log(`✓ 创建了 ${2} 个 AI 模型`);
 
   // 2. 创建投资组合
   console.log("创建投资组合...");
@@ -102,25 +76,7 @@ async function main() {
     },
   });
 
-  const portfolio3 = await prisma.portfolio.create({
-    data: {
-      modelId: claude.id,
-      cash: 92000,
-      totalValue: 105000,
-      initialValue: 100000,
-    },
-  });
-
-  const portfolio4 = await prisma.portfolio.create({
-    data: {
-      modelId: gpt.id,
-      cash: 88000,
-      totalValue: 110000,
-      initialValue: 100000,
-    },
-  });
-
-  console.log(`✓ 创建了 ${4} 个投资组合`);
+  console.log(`✓ 创建了 ${2} 个投资组合`);
 
   // 3. 创建持仓
   console.log("创建持仓数据...");
@@ -155,26 +111,6 @@ async function main() {
         marketValue: 18000,
         unrealizedPnL: 1000,
       },
-      // Claude 持仓
-      {
-        portfolioId: portfolio3.id,
-        symbol: "MSFT",
-        quantity: 30,
-        avgPrice: 400,
-        currentPrice: 433.33,
-        marketValue: 13000,
-        unrealizedPnL: 1000,
-      },
-      // GPT-4 持仓
-      {
-        portfolioId: portfolio4.id,
-        symbol: "GOOGL",
-        quantity: 150,
-        avgPrice: 140,
-        currentPrice: 146.67,
-        marketValue: 22000,
-        unrealizedPnL: 1000,
-      },
     ],
   });
 
@@ -207,28 +143,6 @@ async function main() {
       cash: 90000,
       positionValue: qw_value - 90000,
       returnPct: ((qw_value - 100000) / 100000) * 100,
-      timestamp,
-    });
-
-    // Claude 快照 (波动)
-    const cl_value = 100000 + (5000 * (72 - i)) / 72 + Math.sin(i / 10) * 3000;
-    snapshots.push({
-      portfolioId: portfolio3.id,
-      totalValue: cl_value,
-      cash: 92000,
-      positionValue: cl_value - 92000,
-      returnPct: ((cl_value - 100000) / 100000) * 100,
-      timestamp,
-    });
-
-    // GPT-4 快照 (强势上涨)
-    const gpt_value = 100000 + (10000 * (72 - i)) / 72 + Math.random() * 1500;
-    snapshots.push({
-      portfolioId: portfolio4.id,
-      totalValue: gpt_value,
-      cash: 88000,
-      positionValue: gpt_value - 88000,
-      returnPct: ((gpt_value - 100000) / 100000) * 100,
       timestamp,
     });
   }
@@ -280,36 +194,6 @@ async function main() {
         "苹果新品发布会反响热烈，iPhone销量预期上调，加上服务业务增长强劲，值得配置。",
       status: "EXECUTED",
       executedAt: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000),
-    },
-  });
-
-  const trade4 = await prisma.trade.create({
-    data: {
-      modelId: claude.id,
-      symbol: "MSFT",
-      side: "BUY",
-      quantity: 30,
-      price: 400,
-      amount: 12000,
-      rationale:
-        "微软云业务Azure增长强劲，与OpenAI的合作深化，AI战略清晰，长期看好。",
-      status: "EXECUTED",
-      executedAt: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000),
-    },
-  });
-
-  const trade5 = await prisma.trade.create({
-    data: {
-      modelId: gpt.id,
-      symbol: "GOOGL",
-      side: "BUY",
-      quantity: 150,
-      price: 140,
-      amount: 21000,
-      rationale:
-        "Google的Gemini模型表现优异，搜索业务稳定，广告收入回暖，估值合理。",
-      status: "EXECUTED",
-      executedAt: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000),
     },
   });
 

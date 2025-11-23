@@ -6,6 +6,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { prisma } from "./lib/prisma";
 import { Logger } from "./lib/logger";
+import { ConfigValidator } from "./lib/config-validator";
 import routes from "./routes";
 import { WebSocketServer } from "./websocket/server";
 import { TradingCron } from "./cron/trading.cron";
@@ -14,6 +15,19 @@ import { TradingCron } from "./cron/trading.cron";
 dotenv.config();
 
 const logger = Logger.create("App");
+
+// 验证配置
+const configValidation = ConfigValidator.validate();
+if (!configValidation.valid) {
+  logger.error("❌ 配置验证失败！请检查.env文件");
+  logger.error("\n错误列表：");
+  configValidation.errors.forEach(err => logger.error(err));
+  logger.error("\n💡 请参考 ENV_CONFIG.md 了解所需配置");
+  process.exit(1);
+}
+
+// 打印配置摘要
+ConfigValidator.printSummary();
 
 const app: Application = express();
 const httpServer = createServer(app);

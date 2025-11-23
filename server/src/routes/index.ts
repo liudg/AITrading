@@ -3,25 +3,17 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { Logger } from '../lib/logger';
-import { llmAdapterFactory } from '../factories/llm-adapter.factory';
-import { PortfolioService } from '../services/portfolio.service';
-import { StockPickerService } from '../services/stockpicker.service';
-import { BrainService } from '../services/brain.service';
-import { ReportService } from '../services/report.service';
-import { MockMarketDataProvider, MockNewsDataProvider } from '../adapters/data/mock.adapter';
+import { serviceContainer } from '../lib/service-container';
 
 const router = Router();
 const logger = Logger.create('Routes');
 
-// 初始化服务（这里使用 Mock 数据，后续可以替换为真实 API）
-const portfolioService = new PortfolioService();
-const marketDataProvider = new MockMarketDataProvider();
-const newsDataProvider = new MockNewsDataProvider();
-const reportService = new ReportService();
-
-// DeepSeek 选股服务（使用工厂）
-const deepseekAdapter = llmAdapterFactory.getAdapterByModelName('deepseek');
-const stockPickerService = new StockPickerService(deepseekAdapter);
+// 从服务容器获取服务实例（单例）
+const portfolioService = serviceContainer.getPortfolioService();
+const marketDataProvider = serviceContainer.getMarketDataProvider();
+const newsDataProvider = serviceContainer.getNewsDataProvider();
+const reportService = serviceContainer.getReportService();
+const stockPickerService = serviceContainer.getStockPickerService();
 
 // ========== 模型管理 ==========
 
@@ -215,6 +207,7 @@ router.post('/stock-analysis', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Symbol is required' });
     }
 
+    const deepseekAdapter = serviceContainer.getLLMAdapter('deepseek');
     const analysis = await deepseekAdapter.analyzeSingleStock({ symbol, criteria });
 
     logger.info(`Stock analysis completed for ${symbol}`);

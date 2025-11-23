@@ -5,17 +5,28 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, watch } from 'vue';
+import { onMounted, onBeforeUnmount, watch } from 'vue';
 import { useTradingStore } from '@/stores/trading.store';
 import { useWebSocket } from '@/composables/useWebSocket';
 import { WSMessageType, type WSMessage } from '@/types';
 
 const tradingStore = useTradingStore();
-const { messages } = useWebSocket();
+const { messages, connect, disconnect } = useWebSocket();
 
-// 初始化数据
+// 初始化应用
 onMounted(async () => {
+  // 1. 初始化 WebSocket 连接（全局单例）
+  connect();
+  console.log('[App] WebSocket initialized');
+
+  // 2. 初始化数据
   await tradingStore.initialize();
+});
+
+// 应用卸载时断开连接
+onBeforeUnmount(() => {
+  disconnect();
+  console.log('[App] WebSocket disconnected');
 });
 
 // 监听 WebSocket 消息

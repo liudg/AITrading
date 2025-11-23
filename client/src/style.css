@@ -64,6 +64,19 @@
   animation: pulse-green 2s ease-in-out infinite;
 }
 
+@keyframes pulse-red {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.pulse-red {
+  animation: pulse-red 2s ease-in-out infinite;
+}
+
 @keyframes slide-up {
   from {
     transform: translateY(20px);

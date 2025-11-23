@@ -3,15 +3,8 @@
 import cron from 'node-cron';
 import { prisma } from '../lib/prisma';
 import { Logger } from '../lib/logger';
-import { llmAdapterFactory } from '../factories/llm-adapter.factory';
-import { BrainService } from '../services/brain.service';
-import { ReflectionService } from '../services/reflection.service';
-import { PortfolioService } from '../services/portfolio.service';
-import { StockPickerService } from '../services/stockpicker.service';
-import { ReportService } from '../services/report.service';
-import { MockMarketDataProvider, MockNewsDataProvider } from '../adapters/data/mock.adapter';
+import { serviceContainer } from '../lib/service-container';
 import { WebSocketServer } from '../websocket/server';
-import { ILLMProvider } from '../adapters/llm/interface';
 
 const logger = Logger.create('TradingCron');
 
@@ -26,11 +19,6 @@ interface TaskLock {
 
 export class TradingCron {
   private wsServer: WebSocketServer;
-  private portfolioService: PortfolioService;
-  private stockPickerService: StockPickerService;
-  private reportService: ReportService;
-  private marketDataProvider: MockMarketDataProvider;
-  private newsDataProvider: MockNewsDataProvider;
   
   // 任务执行锁（防止重复执行）
   private taskLocks: TaskLock = {
@@ -41,14 +29,7 @@ export class TradingCron {
 
   constructor(wsServer: WebSocketServer) {
     this.wsServer = wsServer;
-    this.portfolioService = new PortfolioService();
-    this.reportService = new ReportService();
-    this.marketDataProvider = new MockMarketDataProvider();
-    this.newsDataProvider = new MockNewsDataProvider();
-
-    // 初始化选股服务（使用工厂）
-    const deepseekAdapter = llmAdapterFactory.getAdapterByModelName('deepseek');
-    this.stockPickerService = new StockPickerService(deepseekAdapter);
+    logger.info('TradingCron initialized with service container');
   }
 
   /**
@@ -131,7 +112,8 @@ export class TradingCron {
    * 获取股票池
    */
   private async getStockPool(): Promise<string[]> {
-    const stockPool = await this.stockPickerService.getActiveStockPool();
+    const stockPickerService = serviceContainer.getStockPickerService();
+    const stockPool = await stockPickerService.getActiveStockPool();
     logger.info(`Stock pool: ${stockPool.join(', ')}`);
     return stockPool;
   }
@@ -196,8 +178,8 @@ export class TradingCron {
   /**
    * 获取 LLM 提供商适配器
    */
-  private getLLMProvider(modelName: string): ILLMProvider {
-    return llmAdapterFactory.getAdapterByModelName(modelName);
+  private getLLMProvider(modelName: string) {
+    return serviceContainer.getLLMAdapter(modelName);
   }
 
   /**
@@ -206,15 +188,10 @@ export class TradingCron {
   private async performAnalysis(
     modelId: string,
     modelName: string,
-    llmProvider: ILLMProvider,
+    llmProvider: any,
     stockPool: string[]
   ) {
-    const brainService = new BrainService(
-      llmProvider,
-      this.marketDataProvider,
-      this.newsDataProvider,
-      this.portfolioService
-    );
+    const brainService = serviceContainer.getBrainService(modelName);
 
     this.wsServer.sendModelThinking(modelId, `${modelName} is analyzing market data...`);
     const decisions = await brainService.analyze(modelId, stockPool);
@@ -231,15 +208,10 @@ export class TradingCron {
   private async executeTrades(
     modelId: string,
     modelName: string,
-    llmProvider: ILLMProvider,
+    llmProvider: any,
     decisions: any[]
   ): Promise<void> {
-    const brainService = new BrainService(
-      llmProvider,
-      this.marketDataProvider,
-      this.newsDataProvider,
-      this.portfolioService
-    );
+    const brainService = serviceContainer.getBrainService(modelName);
 
     await brainService.executeTrades(modelId, decisions);
     logger.debug(`${modelName} executed ${decisions.length} trades`);
@@ -249,15 +221,18 @@ export class TradingCron {
    * 更新持仓价格
    */
   private async updatePositionPrices(modelId: string, stockPool: string[]): Promise<void> {
-    const currentPrices = await this.marketDataProvider.getCurrentPrices(stockPool);
-    await this.portfolioService.updatePositionPrices(modelId, currentPrices);
+    const marketDataProvider = serviceContainer.getMarketDataProvider();
+    const portfolioService = serviceContainer.getPortfolioService();
+    const currentPrices = await marketDataProvider.getCurrentPrices(stockPool);
+    await portfolioService.updatePositionPrices(modelId, currentPrices);
   }
 
   /**
    * 发送投资组合更新到前端
    */
   private async sendPortfolioUpdate(modelId: string): Promise<void> {
-    const portfolio = await this.portfolioService.getPortfolioStatus(modelId);
+    const portfolioService = serviceContainer.getPortfolioService();
+    const portfolio = await portfolioService.getPortfolioStatus(modelId);
     this.wsServer.sendPortfolioUpdate(modelId, portfolio);
     logger.info(`Portfolio value: $${portfolio.totalValue.toFixed(2)}`);
   }
@@ -309,15 +284,8 @@ export class TradingCron {
     try {
       logger.info(`Reflecting for model: ${modelName}`);
 
-      // 获取 LLM 适配器
-      const llmProvider = this.getLLMProvider(modelName);
-
-      // 创建反思服务
-      const reflectionService = new ReflectionService(
-        llmProvider,
-        this.marketDataProvider,
-        this.newsDataProvider
-      );
+      // 获取反思服务
+      const reflectionService = serviceContainer.getReflectionService(modelName);
 
       // 执行反思
       const reflectionDays = parseInt(process.env.REFLECTION_DAYS || '5');
@@ -346,7 +314,8 @@ export class TradingCron {
     try {
       logger.info('=== Generating Daily Report ===');
 
-      const reportId = await this.reportService.generateDailyReport();
+      const reportService = serviceContainer.getReportService();
+      const reportId = await reportService.generateDailyReport();
       
       logger.info(`Daily report generated successfully: ${reportId}`);
     } catch (error: any) {

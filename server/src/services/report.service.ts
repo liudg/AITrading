@@ -1,10 +1,11 @@
 // 战报生成服务
 
-import { prisma } from '../lib/prisma';
-import { Logger } from '../lib/logger';
-import { PortfolioService } from './portfolio.service';
+import { prisma } from "../lib/prisma";
+import { Logger } from "../lib/logger";
+import { serviceContainer } from "../lib/service-container";
+import { PortfolioService } from "./portfolio.service";
 
-const logger = Logger.create('ReportService');
+const logger = Logger.create("ReportService");
 
 export interface DailyReportData {
   day: number;
@@ -34,9 +35,9 @@ export interface ModelPerformanceData {
   winRate?: number;
   bestTrade?: any;
   worstTrade?: any;
-  todayTrades?: any[];  // 当日所有交易
-  todayBestTradeId?: string | null;  // 当日最佳交易ID
-  todayWorstTradeId?: string | null;  // 当日最差交易ID
+  todayTrades?: any[]; // 当日所有交易
+  todayBestTradeId?: string | null; // 当日最佳交易ID
+  todayWorstTradeId?: string | null; // 当日最差交易ID
   strategyAnalysis?: string;
   keyInsights?: string[];
 }
@@ -45,16 +46,31 @@ export class ReportService {
   private portfolioService: PortfolioService;
 
   constructor() {
-    this.portfolioService = new PortfolioService();
+    // 在构造函数中获取并缓存服务实例
+    this.portfolioService = serviceContainer.getPortfolioService();
   }
 
   /**
    * 生成每日战报
    */
   async generateDailyReport(date?: Date): Promise<string> {
-    const reportDate = date || new Date();
-    
-    logger.info(`Generating daily report for ${reportDate.toISOString().split('T')[0]}`);
+    let reportDate = date || new Date();
+
+    // 如果是周末，使用上一个交易日（周五）
+    const dayOfWeek = reportDate.getDay();
+    if (dayOfWeek === 0) {
+      // 周日
+      reportDate = new Date(reportDate);
+      reportDate.setDate(reportDate.getDate() - 2);
+    } else if (dayOfWeek === 6) {
+      // 周六
+      reportDate = new Date(reportDate);
+      reportDate.setDate(reportDate.getDate() - 1);
+    }
+
+    logger.info(
+      `Generating daily report for ${reportDate.toISOString().split("T")[0]}`
+    );
 
     try {
       // 1. 计算当前是第几天
@@ -70,7 +86,10 @@ export class ReportService {
       });
 
       if (models.length === 0) {
-        throw new Error('No active models found');
+        logger.warn("No active models found for report generation");
+        throw new Error(
+          "Cannot generate daily report: No active models found. Please enable at least one model."
+        );
       }
 
       // 3. 获取昨天的战报（用于计算排名变化）
@@ -78,9 +97,9 @@ export class ReportService {
         where: { day: dayNumber - 1 },
         include: {
           modelPerformances: {
-            orderBy: { returnPct: 'desc' }
-          }
-        }
+            orderBy: { returnPct: "desc" },
+          },
+        },
       });
 
       // 构建昨日排名映射
@@ -100,12 +119,18 @@ export class ReportService {
           continue;
         }
 
-        const performance = await this.collectModelPerformance(model.id, model.name, reportDate);
+        const performance = await this.collectModelPerformance(
+          model.id,
+          model.name,
+          reportDate
+        );
         modelPerformances.push(performance);
       }
 
       // 5. 计算排名并添加排名变化
-      const sortedPerformances = [...modelPerformances].sort((a, b) => b.returnPct - a.returnPct);
+      const sortedPerformances = [...modelPerformances].sort(
+        (a, b) => b.returnPct - a.returnPct
+      );
       sortedPerformances.forEach((perf, index) => {
         const currentRank = index + 1;
         const yesterdayRank = yesterdayRankMap.get(perf.modelId);
@@ -129,7 +154,7 @@ export class ReportService {
         data: {
           day: dayNumber,
           date: reportDate,
-          title: `Day ${dayNumber} 战报：6大AI模型表现对比 • 策略分析与关键洞察`,
+          title: `Day ${dayNumber} 战报：${models.length}个AI模型表现对比 • 策略分析与关键洞察`,
           summary: this.generateSummary(modelPerformances),
           overallInsight,
           modelPerformances: {
@@ -150,16 +175,21 @@ export class ReportService {
               sellCount: perf.sellCount,
               winRate: perf.winRate,
               bestTrade: perf.bestTrade ? JSON.stringify(perf.bestTrade) : null,
-              worstTrade: perf.worstTrade ? JSON.stringify(perf.worstTrade) : null,
-              todayTrades: perf.todayTrades && perf.todayTrades.length > 0 
-                ? JSON.stringify({
-                    trades: perf.todayTrades,
-                    bestTradeId: perf.todayBestTradeId,
-                    worstTradeId: perf.todayWorstTradeId,
-                  })
+              worstTrade: perf.worstTrade
+                ? JSON.stringify(perf.worstTrade)
                 : null,
+              todayTrades:
+                perf.todayTrades && perf.todayTrades.length > 0
+                  ? JSON.stringify({
+                      trades: perf.todayTrades,
+                      bestTradeId: perf.todayBestTradeId,
+                      worstTradeId: perf.todayWorstTradeId,
+                    })
+                  : null,
               strategyAnalysis: perf.strategyAnalysis,
-              keyInsights: perf.keyInsights ? JSON.stringify(perf.keyInsights) : null,
+              keyInsights: perf.keyInsights
+                ? JSON.stringify(perf.keyInsights)
+                : null,
             })),
           },
           stockDistributions: {
@@ -170,7 +200,10 @@ export class ReportService {
               totalValue: dist.totalValue,
               totalPnL: dist.totalPnL,
               holders: JSON.stringify(dist.holders),
-              changes: dist.changes && dist.changes.length > 0 ? JSON.stringify(dist.changes) : null,
+              changes:
+                dist.changes && dist.changes.length > 0
+                  ? JSON.stringify(dist.changes)
+                  : null,
             })),
           },
         },
@@ -188,7 +221,7 @@ export class ReportService {
 
       return report.id;
     } catch (error: any) {
-      logger.error('Failed to generate daily report', error);
+      logger.error("Failed to generate daily report", error);
       throw error;
     }
   }
@@ -201,7 +234,7 @@ export class ReportService {
     modelName: string,
     date: Date
   ): Promise<ModelPerformanceData> {
-    // 获取投资组合状态
+    // 使用缓存的 portfolioService 实例
     const portfolio = await this.portfolioService.getPortfolioStatus(modelId);
 
     // 获取投资组合记录（需要 portfolioId）
@@ -225,7 +258,10 @@ export class ReportService {
       currentPrice: pos.currentPrice,
       marketValue: pos.marketValue,
       unrealizedPnL: pos.unrealizedPnL,
-      unrealizedPnLPct: ((pos.unrealizedPnL / (pos.avgPrice * pos.quantity)) * 100).toFixed(2),
+      unrealizedPnLPct: (
+        (pos.unrealizedPnL / (pos.avgPrice * pos.quantity)) *
+        100
+      ).toFixed(2),
     }));
 
     // 获取当日交易记录
@@ -243,28 +279,33 @@ export class ReportService {
         },
       },
       orderBy: {
-        executedAt: 'asc',
+        executedAt: "asc",
       },
     });
 
-    const buyCount = todayTrades.filter((t) => t.side === 'BUY').length;
-    const sellCount = todayTrades.filter((t) => t.side === 'SELL').length;
+    const buyCount = todayTrades.filter((t) => t.side === "BUY").length;
+    const sellCount = todayTrades.filter((t) => t.side === "SELL").length;
 
     // 计算胜率（基于已平仓交易）
     const closedTrades = await prisma.trade.findMany({
       where: {
         modelId,
-        status: 'CLOSED',
+        status: "CLOSED",
         pnl: { not: null },
       },
     });
 
-    const winRate = closedTrades.length > 0
-      ? (closedTrades.filter((t) => (t.pnl || 0) > 0).length / closedTrades.length) * 100
-      : undefined;
+    const winRate =
+      closedTrades.length > 0
+        ? (closedTrades.filter((t) => (t.pnl || 0) > 0).length /
+            closedTrades.length) *
+          100
+        : undefined;
 
     // 找出全局最佳和最差交易
-    const sortedByPnl = [...closedTrades].sort((a, b) => (b.pnl || 0) - (a.pnl || 0));
+    const sortedByPnl = [...closedTrades].sort(
+      (a, b) => (b.pnl || 0) - (a.pnl || 0)
+    );
     const bestTrade = sortedByPnl[0]
       ? {
           symbol: sortedByPnl[0].symbol,
@@ -284,47 +325,54 @@ export class ReportService {
       : undefined;
 
     // 收集当日所有交易（包括未平仓），按时间排序
-    const allTodayTrades = todayTrades.map((trade) => {
-      // 对于未平仓交易，计算浮动盈亏
-      let pnl = trade.pnl;
-      let pnlPct = null;
-      
-      if (trade.status !== 'CLOSED' && trade.side === 'BUY') {
-        // 查找对应的持仓来获取当前价格
-        const position = positions.find(p => p.symbol === trade.symbol);
-        if (position) {
-          pnl = (position.currentPrice - trade.price) * trade.quantity;
-          pnlPct = ((position.currentPrice - trade.price) / trade.price) * 100;
+    const allTodayTrades = todayTrades
+      .map((trade) => {
+        // 对于未平仓交易，计算浮动盈亏
+        let pnl = trade.pnl;
+        let pnlPct = null;
+
+        if (trade.status !== "CLOSED" && trade.side === "BUY") {
+          // 查找对应的持仓来获取当前价格
+          const position = positions.find((p) => p.symbol === trade.symbol);
+          if (position) {
+            pnl = (position.currentPrice - trade.price) * trade.quantity;
+            pnlPct =
+              ((position.currentPrice - trade.price) / trade.price) * 100;
+          }
         }
-      }
-      
-      return {
-        id: trade.id,
-        symbol: trade.symbol,
-        side: trade.side,
-        quantity: trade.quantity,
-        price: trade.price,
-        amount: trade.amount,
-        pnl,
-        pnlPct,
-        rationale: trade.rationale,
-        status: trade.status,
-        executedAt: trade.executedAt,
-      };
-    }).sort((a, b) => {
-      // 按执行时间排序
-      const timeA = a.executedAt ? new Date(a.executedAt).getTime() : 0;
-      const timeB = b.executedAt ? new Date(b.executedAt).getTime() : 0;
-      return timeA - timeB;
-    });
+
+        return {
+          id: trade.id,
+          symbol: trade.symbol,
+          side: trade.side,
+          quantity: trade.quantity,
+          price: trade.price,
+          amount: trade.amount,
+          pnl,
+          pnlPct,
+          rationale: trade.rationale,
+          status: trade.status,
+          executedAt: trade.executedAt,
+        };
+      })
+      .sort((a, b) => {
+        // 按执行时间排序
+        const timeA = a.executedAt ? new Date(a.executedAt).getTime() : 0;
+        const timeB = b.executedAt ? new Date(b.executedAt).getTime() : 0;
+        return timeA - timeB;
+      });
 
     // 找出当日最佳和最差交易（仅已平仓的）
-    const todayClosedTrades = allTodayTrades.filter(t => t.status === 'CLOSED' && t.pnl !== null);
+    const todayClosedTrades = allTodayTrades.filter(
+      (t) => t.status === "CLOSED" && t.pnl !== null
+    );
     let bestTradeId = null;
     let worstTradeId = null;
-    
+
     if (todayClosedTrades.length > 0) {
-      const sortedByPnl = [...todayClosedTrades].sort((a, b) => (b.pnl || 0) - (a.pnl || 0));
+      const sortedByPnl = [...todayClosedTrades].sort(
+        (a, b) => (b.pnl || 0) - (a.pnl || 0)
+      );
       bestTradeId = sortedByPnl[0].id;
       worstTradeId = sortedByPnl[sortedByPnl.length - 1].id;
     }
@@ -341,7 +389,7 @@ export class ReportService {
         },
       },
       orderBy: {
-        timestamp: 'desc',
+        timestamp: "desc",
       },
     });
 
@@ -407,25 +455,38 @@ export class ReportService {
     const best = sorted[0];
     const worst = sorted[sorted.length - 1];
 
-    return `今日共有${performances.length}个AI模型参与交易。表现最佳的是${best.modelName}，收益率${best.returnPct.toFixed(2)}%；${worst.modelName}表现相对较弱，收益率${worst.returnPct.toFixed(2)}%。整体而言，市场${performances.filter(p => p.returnPct > 0).length > performances.length / 2 ? '呈现上涨趋势' : '表现震荡'}。`;
+    return `今日共有${performances.length}个AI模型参与交易。表现最佳的是${
+      best.modelName
+    }，收益率${best.returnPct.toFixed(2)}%；${
+      worst.modelName
+    }表现相对较弱，收益率${worst.returnPct.toFixed(2)}%。整体而言，市场${
+      performances.filter((p) => p.returnPct > 0).length >
+      performances.length / 2
+        ? "呈现上涨趋势"
+        : "表现震荡"
+    }。`;
   }
 
   /**
    * 生成整体洞察
    */
   private generateOverallInsight(performances: ModelPerformanceData[]): string {
-    const avgReturn = performances.reduce((sum, p) => sum + p.returnPct, 0) / performances.length;
+    const avgReturn =
+      performances.reduce((sum, p) => sum + p.returnPct, 0) /
+      performances.length;
     const totalTrades = performances.reduce((sum, p) => sum + p.tradesCount, 0);
 
-    let insight = `本交易日${performances.length}个AI模型平均收益率为${avgReturn.toFixed(2)}%，`;
+    let insight = `本交易日${
+      performances.length
+    }个AI模型平均收益率为${avgReturn.toFixed(2)}%，`;
     insight += `共执行${totalTrades}笔交易。`;
 
     if (avgReturn > 2) {
-      insight += ' 整体表现优异，多数模型把握住了市场机会。';
+      insight += " 整体表现优异，多数模型把握住了市场机会。";
     } else if (avgReturn > 0) {
-      insight += ' 市场表现平稳，各模型策略稳健。';
+      insight += " 市场表现平稳，各模型策略稳健。";
     } else {
-      insight += ' 市场波动较大，各模型采取谨慎策略。';
+      insight += " 市场波动较大，各模型采取谨慎策略。";
     }
 
     return insight;
@@ -442,15 +503,15 @@ export class ReportService {
     if (trades.length > 0) {
       analysis += `今日执行${trades.length}笔交易。`;
     } else {
-      analysis += '今日暂无交易，保持观望。';
+      analysis += "今日暂无交易，保持观望。";
     }
 
     if (performance.totalReturnPct > 5) {
-      analysis += ' 该模型表现出色，投资策略成效显著。';
+      analysis += " 该模型表现出色，投资策略成效显著。";
     } else if (performance.totalReturnPct > 0) {
-      analysis += ' 该模型保持稳健盈利。';
+      analysis += " 该模型保持稳健盈利。";
     } else {
-      analysis += ' 该模型正在调整策略以应对市场变化。';
+      analysis += " 该模型正在调整策略以应对市场变化。";
     }
 
     return analysis;
@@ -467,7 +528,9 @@ export class ReportService {
     }
 
     if (metrics.dailyReturnPct !== undefined && metrics.dailyReturnPct > 5) {
-      insights.push(`单日收益率高达${metrics.dailyReturnPct.toFixed(2)}%，表现强劲`);
+      insights.push(
+        `单日收益率高达${metrics.dailyReturnPct.toFixed(2)}%，表现强劲`
+      );
     }
 
     if (metrics.winRate !== undefined && metrics.winRate > 70) {
@@ -477,11 +540,11 @@ export class ReportService {
     if (metrics.tradesCount > 5) {
       insights.push(`交易频率较高，采用积极的交易策略`);
     } else if (metrics.tradesCount === 0) {
-      insights.push('暂无交易，采取观望策略');
+      insights.push("暂无交易，采取观望策略");
     }
 
     if (insights.length === 0) {
-      insights.push('策略稳健，持续观察市场动向');
+      insights.push("策略稳健，持续观察市场动向");
     }
 
     return insights;
@@ -500,7 +563,7 @@ export class ReportService {
 
     for (const perf of performances) {
       const modelName = perf.modelName;
-      
+
       // 当前持仓
       for (const pos of perf.positionsDetail) {
         if (!stockMap.has(pos.symbol)) {
@@ -510,7 +573,7 @@ export class ReportService {
             clearedToday: new Set<string>(),
           });
         }
-        
+
         stockMap.get(pos.symbol).holders.push({
           modelName,
           shares: pos.quantity,
@@ -519,12 +582,14 @@ export class ReportService {
           pnl: pos.unrealizedPnL,
         });
       }
-      
+
       // 检查当日清仓的股票（卖出但不再持有）
       if (perf.todayTrades) {
         for (const trade of perf.todayTrades) {
-          if (trade.side === 'SELL' || trade.status === 'CLOSED') {
-            const hasPosition = perf.positionsDetail.some(p => p.symbol === trade.symbol);
+          if (trade.side === "SELL" || trade.status === "CLOSED") {
+            const hasPosition = perf.positionsDetail.some(
+              (p) => p.symbol === trade.symbol
+            );
             if (!hasPosition) {
               // 当日已清仓
               if (!stockMap.has(trade.symbol)) {
@@ -550,11 +615,13 @@ export class ReportService {
           stockDistributions: true,
         },
       });
-      
+
       if (yesterdayReport) {
         for (const dist of yesterdayReport.stockDistributions) {
           const holders = JSON.parse(dist.holders);
-          const holderNames: Set<string> = new Set(holders.map((h: any) => h.modelName));
+          const holderNames: Set<string> = new Set(
+            holders.map((h: any) => h.modelName)
+          );
           yesterdayDistributions.set(dist.symbol, holderNames);
         }
       }
@@ -562,42 +629,55 @@ export class ReportService {
 
     // 3. 计算每只股票的统计数据和变化
     const distributions: any[] = [];
-    
+
     for (const [symbol, data] of stockMap) {
       const holders = data.holders;
       const clearedToday = data.clearedToday;
-      
+
       const holdingAICount = holders.length;
-      const totalShares = holders.reduce((sum: number, h: any) => sum + h.shares, 0);
-      const totalValue = holders.reduce((sum: number, h: any) => sum + (h.shares * h.currentPrice), 0);
+      const totalShares = holders.reduce(
+        (sum: number, h: any) => sum + h.shares,
+        0
+      );
+      const totalValue = holders.reduce(
+        (sum: number, h: any) => sum + h.shares * h.currentPrice,
+        0
+      );
       const totalPnL = holders.reduce((sum: number, h: any) => sum + h.pnl, 0);
-      
+
       // 计算变化
       const changes: any[] = [];
-      const todayHolders: Set<string> = new Set(holders.map((h: any) => h.modelName));
-      const yesterdayHolders: Set<string> = yesterdayDistributions.get(symbol) || new Set<string>();
-      
+      const todayHolders: Set<string> = new Set(
+        holders.map((h: any) => h.modelName)
+      );
+      const yesterdayHolders: Set<string> =
+        yesterdayDistributions.get(symbol) || new Set<string>();
+
       // 新增持仓
       for (const modelName of todayHolders) {
         if (!yesterdayHolders.has(modelName)) {
-          changes.push({ modelName, action: 'NEW' });
+          changes.push({ modelName, action: "NEW" });
         }
       }
-      
+
       // 清仓
       for (const modelName of yesterdayHolders) {
         if (!todayHolders.has(modelName)) {
-          changes.push({ modelName, action: 'CLOSED' });
+          changes.push({ modelName, action: "CLOSED" });
         }
       }
-      
+
       // 当日清仓（今天还交易了但最终清仓了）
       for (const modelName of clearedToday) {
-        if (!changes.some(c => c.modelName === modelName && c.action === 'CLOSED')) {
-          changes.push({ modelName, action: 'CLOSED' });
+        if (
+          !changes.some(
+            (c) => c.modelName === modelName && c.action === "CLOSED"
+          )
+        ) {
+          changes.push({ modelName, action: "CLOSED" });
         }
       }
-      
+
       distributions.push({
         symbol,
         holdingAICount,
@@ -611,7 +691,7 @@ export class ReportService {
 
     // 4. 按持有AI数量降序排序
     distributions.sort((a, b) => b.holdingAICount - a.holdingAICount);
-    
+
     return distributions;
   }
 
@@ -621,7 +701,7 @@ export class ReportService {
   async getReportsList(limit: number = 20): Promise<any[]> {
     const reports = await prisma.dailyReport.findMany({
       orderBy: {
-        day: 'desc',
+        day: "desc",
       },
       take: limit,
     });
@@ -647,28 +727,32 @@ export class ReportService {
             model: true,
           },
           orderBy: {
-            returnPct: 'desc',
+            returnPct: "desc",
           },
         },
         stockDistributions: {
           orderBy: {
-            holdingAICount: 'desc',
+            holdingAICount: "desc",
           },
         },
       },
     });
 
     if (!report) {
-      throw new Error('Report not found');
+      throw new Error("Report not found");
     }
 
     // 解析 JSON 字段
     const performances = report.modelPerformances.map((perf) => {
-      const todayTradesData = perf.todayTrades ? JSON.parse(perf.todayTrades) : null;
-      
+      const todayTradesData = perf.todayTrades
+        ? JSON.parse(perf.todayTrades)
+        : null;
+
       return {
         ...perf,
-        positionsDetail: perf.positionsDetail ? JSON.parse(perf.positionsDetail) : [],
+        positionsDetail: perf.positionsDetail
+          ? JSON.parse(perf.positionsDetail)
+          : [],
         bestTrade: perf.bestTrade ? JSON.parse(perf.bestTrade) : null,
         worstTrade: perf.worstTrade ? JSON.parse(perf.worstTrade) : null,
         todayTrades: todayTradesData?.trades || [],
@@ -705,7 +789,7 @@ export class ReportService {
             model: true,
           },
           orderBy: {
-            returnPct: 'desc',
+            returnPct: "desc",
           },
         },
       },
@@ -717,11 +801,15 @@ export class ReportService {
 
     // 解析 JSON 字段
     const performances = report.modelPerformances.map((perf) => {
-      const todayTradesData = perf.todayTrades ? JSON.parse(perf.todayTrades) : null;
-      
+      const todayTradesData = perf.todayTrades
+        ? JSON.parse(perf.todayTrades)
+        : null;
+
       return {
         ...perf,
-        positionsDetail: perf.positionsDetail ? JSON.parse(perf.positionsDetail) : [],
+        positionsDetail: perf.positionsDetail
+          ? JSON.parse(perf.positionsDetail)
+          : [],
         bestTrade: perf.bestTrade ? JSON.parse(perf.bestTrade) : null,
         worstTrade: perf.worstTrade ? JSON.parse(perf.worstTrade) : null,
         todayTrades: todayTradesData?.trades || [],
@@ -738,4 +826,3 @@ export class ReportService {
     };
   }
 }
-
