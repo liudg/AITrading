@@ -198,9 +198,7 @@ export class PromptBuilder {
   /**
    * 构建单一股票分析提示词
    */
-  static buildSingleStockAnalysisPrompt(
-    input: SingleStockAnalysisInput
-  ): string {
+  static buildSingleStockAnalysisPrompt(input: SingleStockAnalysisInput): string {
     const criteriaSection = input.criteria
       ? `\n## 分析维度要求\n${input.criteria}\n`
       : "";
