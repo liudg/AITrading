@@ -63,22 +63,85 @@
               </div>
             </div>
 
+            <div class="grid grid-cols-2 gap-4">
+              <button
+                @click="performBatchPicking"
+                :disabled="batchLoading || !batchCriteria.trim()"
+                class="cyber-button disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span class="flex items-center justify-center space-x-2">
+                  <svg v-if="batchLoading" class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path
+                      class="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    ></path>
+                  </svg>
+                  <span>{{ batchLoading ? 'AI 分析中...' : '开始批量选股' }}</span>
+                </span>
+              </button>
+              
+              <button
+                @click="loadBatchPromptPreview"
+                :disabled="!batchCriteria.trim()"
+                class="cyber-button bg-cyber-blue/20 hover:bg-cyber-blue/30 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span class="flex items-center justify-center space-x-2">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span>📋 显示提示词</span>
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Prompt Preview -->
+        <div v-if="batchShowPrompt && batchPromptPreview" class="cyber-card bg-cyber-light">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-bold text-cyber-blue">提示词预览</h3>
+            <button @click="batchShowPrompt = false" class="text-sm text-gray-400 hover:text-gray-200">
+              ✕ 关闭
+            </button>
+          </div>
+
+          <div class="space-y-4">
+            <!-- System Prompt -->
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <label class="text-sm font-medium text-cyber-green">System Prompt</label>
+                <button
+                  @click="copyToClipboard(batchPromptPreview.systemPrompt, 'System Prompt')"
+                  class="text-xs text-cyber-blue hover:underline"
+                >
+                  📋 复制
+                </button>
+              </div>
+              <pre class="bg-black/50 p-4 rounded text-xs text-gray-300 overflow-x-auto border border-cyber-gray">{{ batchPromptPreview.systemPrompt }}</pre>
+            </div>
+
+            <!-- User Prompt -->
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <label class="text-sm font-medium text-cyber-green">User Prompt</label>
+                <button
+                  @click="copyToClipboard(batchPromptPreview.userPrompt, 'User Prompt')"
+                  class="text-xs text-cyber-blue hover:underline"
+                >
+                  📋 复制
+                </button>
+              </div>
+              <pre class="bg-black/50 p-4 rounded text-xs text-gray-300 overflow-x-auto border border-cyber-gray max-h-96">{{ batchPromptPreview.userPrompt }}</pre>
+            </div>
+
+            <!-- Copy All Button -->
             <button
-              @click="performBatchPicking"
-              :disabled="batchLoading || !batchCriteria.trim()"
-              class="cyber-button w-full disabled:opacity-50 disabled:cursor-not-allowed"
+              @click="copyToClipboard(batchPromptPreview.systemPrompt + '\n\n' + batchPromptPreview.userPrompt, '完整提示词')"
+              class="cyber-button w-full bg-cyber-green/20 hover:bg-cyber-green/30"
             >
-              <span class="flex items-center justify-center space-x-2">
-                <svg v-if="batchLoading" class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path
-                    class="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
-                <span>{{ batchLoading ? 'AI 分析中...' : '开始批量选股' }}</span>
-              </span>
+              📋 复制完整提示词
             </button>
           </div>
         </div>
@@ -181,22 +244,85 @@
               />
             </div>
 
+            <div class="grid grid-cols-2 gap-4">
+              <button
+                @click="performSingleAnalysis"
+                :disabled="singleLoading || !singleSymbol.trim()"
+                class="cyber-button disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span class="flex items-center justify-center space-x-2">
+                  <svg v-if="singleLoading" class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path
+                      class="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    ></path>
+                  </svg>
+                  <span>{{ singleLoading ? 'AI 分析中...' : '开始分析' }}</span>
+                </span>
+              </button>
+
+              <button
+                @click="loadSinglePromptPreview"
+                :disabled="!singleSymbol.trim()"
+                class="cyber-button bg-cyber-blue/20 hover:bg-cyber-blue/30 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span class="flex items-center justify-center space-x-2">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span>📋 显示提示词</span>
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Prompt Preview -->
+        <div v-if="singleShowPrompt && singlePromptPreview" class="cyber-card bg-cyber-light">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-bold text-cyber-blue">提示词预览</h3>
+            <button @click="singleShowPrompt = false" class="text-sm text-gray-400 hover:text-gray-200">
+              ✕ 关闭
+            </button>
+          </div>
+
+          <div class="space-y-4">
+            <!-- System Prompt -->
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <label class="text-sm font-medium text-cyber-green">System Prompt</label>
+                <button
+                  @click="copyToClipboard(singlePromptPreview.systemPrompt, 'System Prompt')"
+                  class="text-xs text-cyber-blue hover:underline"
+                >
+                  📋 复制
+                </button>
+              </div>
+              <pre class="bg-black/50 p-4 rounded text-xs text-gray-300 overflow-x-auto border border-cyber-gray">{{ singlePromptPreview.systemPrompt }}</pre>
+            </div>
+
+            <!-- User Prompt -->
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <label class="text-sm font-medium text-cyber-green">User Prompt</label>
+                <button
+                  @click="copyToClipboard(singlePromptPreview.userPrompt, 'User Prompt')"
+                  class="text-xs text-cyber-blue hover:underline"
+                >
+                  📋 复制
+                </button>
+              </div>
+              <pre class="bg-black/50 p-4 rounded text-xs text-gray-300 overflow-x-auto border border-cyber-gray max-h-96">{{ singlePromptPreview.userPrompt }}</pre>
+            </div>
+
+            <!-- Copy All Button -->
             <button
-              @click="performSingleAnalysis"
-              :disabled="singleLoading || !singleSymbol.trim()"
-              class="cyber-button w-full disabled:opacity-50 disabled:cursor-not-allowed"
+              @click="copyToClipboard(singlePromptPreview.systemPrompt + '\n\n' + singlePromptPreview.userPrompt, '完整提示词')"
+              class="cyber-button w-full bg-cyber-green/20 hover:bg-cyber-green/30"
             >
-              <span class="flex items-center justify-center space-x-2">
-                <svg v-if="singleLoading" class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path
-                    class="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
-                <span>{{ singleLoading ? 'AI 分析中...' : '开始分析' }}</span>
-              </span>
+              📋 复制完整提示词
             </button>
           </div>
         </div>
@@ -275,7 +401,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import Navbar from '@/components/layout/Navbar.vue';
 import { useTradingStore } from '@/stores/trading.store';
 import type { StockRecommendation } from '@/types';
@@ -292,6 +418,8 @@ const targetReturn = ref('');
 const batchLoading = ref(false);
 const batchRecommendations = ref<StockRecommendation[]>([]);
 const batchSelectedSymbols = ref<string[]>([]);
+const batchPromptPreview = ref<{ systemPrompt: string; userPrompt: string } | null>(null);
+const batchShowPrompt = ref(false);
 
 // Single stock analysis state
 const singleSymbol = ref('');
@@ -305,6 +433,8 @@ const singleAnalysis = ref<{
   recommendation: string;
   reason: string;
 } | null>(null);
+const singlePromptPreview = ref<{ systemPrompt: string; userPrompt: string } | null>(null);
+const singleShowPrompt = ref(false);
 
 // Batch picking functions
 async function performBatchPicking() {
@@ -319,6 +449,29 @@ async function performBatchPicking() {
   } finally {
     batchLoading.value = false;
   }
+}
+
+async function loadBatchPromptPreview() {
+  if (!batchCriteria.value.trim()) return;
+  
+  try {
+    batchPromptPreview.value = await tradingStore.previewStockPickerPrompt(
+      batchCriteria.value,
+      batchMaxResults.value
+    );
+    batchShowPrompt.value = true;
+  } catch (error) {
+    alert('加载提示词失败');
+    console.error(error);
+  }
+}
+
+function copyToClipboard(text: string, label: string) {
+  navigator.clipboard.writeText(text).then(() => {
+    alert(`${label}已复制到剪贴板`);
+  }).catch(() => {
+    alert('复制失败，请手动复制');
+  });
 }
 
 function toggleBatchSelection(symbol: string) {
@@ -378,6 +531,21 @@ async function performSingleAnalysis() {
   }
 }
 
+async function loadSinglePromptPreview() {
+  if (!singleSymbol.value.trim()) return;
+  
+  try {
+    singlePromptPreview.value = await tradingStore.previewStockAnalysisPrompt(
+      singleSymbol.value,
+      singleCriteria.value || undefined
+    );
+    singleShowPrompt.value = true;
+  } catch (error) {
+    alert('加载提示词失败');
+    console.error(error);
+  }
+}
+
 async function addSingleToPool() {
   if (!singleAnalysis.value) return;
   
@@ -399,5 +567,19 @@ function resetSingleForm() {
   singleCriteria.value = '';
   singleAnalysis.value = null;
 }
+
+// 监听批量选股条件变化，自动刷新提示词预览
+watch([batchCriteria, batchMaxResults], () => {
+  if (batchShowPrompt.value && batchCriteria.value.trim()) {
+    loadBatchPromptPreview();
+  }
+});
+
+// 监听单一股票分析条件变化，自动刷新提示词预览
+watch([singleSymbol, singleCriteria], () => {
+  if (singleShowPrompt.value && singleSymbol.value.trim()) {
+    loadSinglePromptPreview();
+  }
+});
 </script>
 

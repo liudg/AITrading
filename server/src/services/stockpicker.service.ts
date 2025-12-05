@@ -3,7 +3,8 @@
 import { prisma } from "../lib/prisma";
 import { Logger } from "../lib/logger";
 import { ILLMProvider } from "../adapters/llm/interface";
-import { StockPickerInput, StockRecommendation } from "../types";
+import { StockPickerInput, StockRecommendation, SingleStockAnalysisInput, SingleStockAnalysisOutput } from "../types";
+import { PromptBuilder } from "../adapters/llm/prompt.builder";
 
 const logger = Logger.create("StockPickerService");
 
@@ -29,6 +30,61 @@ export class StockPickerService {
     return recommendations
       .sort((a, b) => b.score - a.score)
       .slice(0, maxResults);
+  }
+
+  /**
+   * 单一股票分析
+   */
+  async analyzeSingleStock(
+    symbol: string,
+    criteria?: string
+  ): Promise<SingleStockAnalysisOutput> {
+    const input: SingleStockAnalysisInput = {
+      symbol,
+      criteria,
+    };
+
+    const analysis = await this.llmProvider.analyzeSingleStock(input);
+
+    logger.info(`AI analyzed stock: ${symbol}`);
+
+    return analysis;
+  }
+
+  /**
+   * 预览批量选股提示词（不调用LLM）
+   */
+  previewStockPickerPrompt(
+    criteria: string,
+    maxResults: number = 10
+  ): { systemPrompt: string; userPrompt: string } {
+    const input: StockPickerInput = {
+      criteria,
+      maxResults,
+    };
+
+    return {
+      systemPrompt: PromptBuilder.SYSTEM_PROMPT_PICKER,
+      userPrompt: PromptBuilder.buildStockPickerPrompt(input),
+    };
+  }
+
+  /**
+   * 预览单一股票分析提示词（不调用LLM）
+   */
+  previewSingleStockPrompt(
+    symbol: string,
+    criteria?: string
+  ): { systemPrompt: string; userPrompt: string } {
+    const input: SingleStockAnalysisInput = {
+      symbol,
+      criteria,
+    };
+
+    return {
+      systemPrompt: PromptBuilder.SYSTEM_PROMPT_SINGLE_STOCK,
+      userPrompt: PromptBuilder.buildSingleStockAnalysisPrompt(input),
+    };
   }
 
   /**

@@ -141,6 +141,32 @@ export const useTradingStore = defineStore('trading', () => {
     }
   }
 
+  async function previewStockPickerPrompt(criteria: string, maxResults: number = 10): Promise<{ systemPrompt: string; userPrompt: string }> {
+    try {
+      const response = await axios.post(`${API_BASE}/preview-prompt/stock-picker`, {
+        criteria,
+        maxResults,
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Failed to preview stock picker prompt:', error);
+      throw error;
+    }
+  }
+
+  async function previewStockAnalysisPrompt(symbol: string, criteria?: string): Promise<{ systemPrompt: string; userPrompt: string }> {
+    try {
+      const response = await axios.post(`${API_BASE}/preview-prompt/stock-analysis`, {
+        symbol,
+        criteria,
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Failed to preview stock analysis prompt:', error);
+      throw error;
+    }
+  }
+
   function updatePortfolio(modelId: string, portfolio: Portfolio) {
     portfolios.value[modelId] = portfolio;
   }
@@ -186,6 +212,8 @@ export const useTradingStore = defineStore('trading', () => {
     pickStocks,
     saveStockPool,
     analyzeSingleStock,
+    previewStockPickerPrompt,
+    previewStockAnalysisPrompt,
     updatePortfolio,
     addTrade,
     addReflection,

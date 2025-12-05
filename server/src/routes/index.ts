@@ -207,13 +207,50 @@ router.post('/stock-analysis', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Symbol is required' });
     }
 
-    const deepseekAdapter = serviceContainer.getLLMAdapter('deepseek');
-    const analysis = await deepseekAdapter.analyzeSingleStock({ symbol, criteria });
+    const analysis = await stockPickerService.analyzeSingleStock(symbol, criteria);
 
     logger.info(`Stock analysis completed for ${symbol}`);
     res.json(analysis);
   } catch (error: any) {
     logger.error('Failed to analyze stock', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 预览批量选股提示词
+router.post('/preview-prompt/stock-picker', async (req: Request, res: Response) => {
+  try {
+    const { criteria, maxResults = 10 } = req.body;
+
+    if (!criteria) {
+      return res.status(400).json({ error: 'Criteria is required' });
+    }
+
+    const prompts = stockPickerService.previewStockPickerPrompt(criteria, maxResults);
+
+    logger.info('Stock picker prompt preview generated');
+    res.json(prompts);
+  } catch (error: any) {
+    logger.error('Failed to preview stock picker prompt', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 预览单一股票分析提示词
+router.post('/preview-prompt/stock-analysis', async (req: Request, res: Response) => {
+  try {
+    const { symbol, criteria } = req.body;
+
+    if (!symbol) {
+      return res.status(400).json({ error: 'Symbol is required' });
+    }
+
+    const prompts = stockPickerService.previewSingleStockPrompt(symbol, criteria);
+
+    logger.info(`Stock analysis prompt preview generated for ${symbol}`);
+    res.json(prompts);
+  } catch (error: any) {
+    logger.error('Failed to preview stock analysis prompt', error);
     res.status(500).json({ error: error.message });
   }
 });
